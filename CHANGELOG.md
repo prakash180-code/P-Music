@@ -2,6 +2,38 @@
 
 All notable changes to P-Music are documented here.
 
+## [0.15.0] - 2026-08-07
+
+### Sprint 15 — Library Folder Manager (`:features:folders`)
+
+**New `:features:folders` module:**
+- `FolderManagerViewModel` (Hilt) — combines the persisted folder rules with the live song table so every card shows real per-folder statistics. State is a single `FolderManagerUiState` `MutableStateFlow` (cards, restricted mode, search query, list/grid view mode, sort, non-music suggestions, add/rename/stats dialogs, busy + message); cards re-derive via `combine(observeFolders, observeSongs)` → `deriveFolders`/`applySortAndFilter` (sort by name/songs/modified/size) with a `lastFolderUis` cache for instant search/sort; `refreshSuggestions` re-runs after every completed scan so new recordings appear and excluded ones disappear.
+- `ui/FolderManagerScreen.kt` — title + status line ("Scanning the whole device except excluded folders." / restricted-mode text), search field, sort menu, list/grid toggle, folder cards (name, resolved path, `N songs · size`, Excluded/Included chips, "Folder actions" menu with Rename / Refresh / Open folder / Statistics / Move to Included or Excluded / Remove), the non-music suggestion cards ("These folders don't appear to contain music" with Exclude / Dismiss), an empty state ("No folders configured…"), and an **Add folder** action that opens the SAF folder picker → system persistable-grant dialog → a type dialog (**Excluded folder** — hide this folder and everything inside it / **Included folder** — only scan folders you include).
+- `ui/FolderWizardDialog.kt` — first-run wizard ("We found folders that usually don't contain music…") with **Exclude recommended** / **Review** / **Skip**, shown once (`folder_wizard_shown` preference) and auto-dismissed after a scan completes.
+- `TreePathResolver.kt` — pure, unit-tested mapping of a SAF tree Uri to an absolute path (`primary` → `/storage/emulated/0`, `XXXX-XXXX` → `/storage/<id>`, otherwise null); 7 tests.
+- `build.gradle.kts` (depends on `:core:ui` + `:domain` only) + `AndroidManifest.xml`, registered in `settings.gradle.kts`.
+
+**Domain (`:domain`):**
+- `LibraryFolder` (`id`, `folderPath`, `displayName`, `type`, `enabled`, `recursive`, `lastScanned`, `songCount`, `dateAdded`) + `LibraryFolderType` (INCLUDED/EXCLUDED); `LibraryFolderRepository` contract (`observeFolders`, `addFolder`, `setEnabled`, `setType`, `renameFolder`, `removeFolder`, `discoverNonMusicFolders`).
+- `FolderRules` + `FolderRulesMatcher` — pure path rules shared by the scanner/repository/UI: `normalize` (trim, flip separators, drop trailing slash), `isUnder` (recursive, case-insensitive containment), `isAllowed` (excluded always wins; empty included ⇒ whole device minus excluded; else only under included). 13 tests.
+
+**Core database (`:core:database`):**
+- `library_folders` table (`LibraryFolderEntity`, `LibraryFolderDao` with reactive `observeAll` + mutation DAOs), `MIGRATION_3_4`, `PMusicDatabase` bumped to version 4, exported schema `4.json`.
+
+**Data (`:data`):**
+- `LibraryFolderRepositoryImpl` (@Singleton) — persists rules and resolves suggested paths; on every rule mutation it purges songs that the new rules hide and triggers a reconciliation rescan so newly-included files come back.
+- `MediaLibraryScanner` now applies the folder rules **before** any metadata work: pass 1 collects the allowed MediaStore ids via `FolderRulesMatcher.isAllowed`, pass 2 upserts only those rows, stale rows are removed — so excluded songs are never inserted, never genre/art-enriched, and their Room rows disappear.
+- `NonMusicFolderDetector` + `NonMusicFolderClassifier` — MediaStore pass grouped by parent folder; a folder is suggested when its name matches well-known non-music locations (call/voice recordings, messengers, notifications, ringtones, alarms) or it holds mostly short clips (`< 15 s`, at least 3 files). The classifier gained a **recursive music-container guard** (see the fix below). 18 tests.
+- `MediaStoreWatcher` (@Singleton, Hilt) — `registerContentObserver` on the MediaStore audio URI, debounced, idempotent `start()`, triggers a forced rescan on change.
+
+**App shell (`:app`):**
+- `AppRootScreen` hosts `FolderManagerScreen` (Settings → Library → Folder Manager) and the wizard as overlays (`showFolderManager` state, reset on nav taps); `SettingsScreen` gained `onOpenFolderManager` and a **Folder Manager** row in the Library section (above Statistics); `MainActivity` starts `MediaStoreWatcher` after playback connects; version bumped to 0.15.0 (versionCode 15).
+
+**Detection fix found during on-device verification:**
+- The detector suggested excluding `/storage/7FDE-1813/Recordings (1)` purely because its name matched "recordings" — but on this device that folder recursively held **1,775 of the 1,789 songs** (a "Call till 21.11.24" subfolder is the real music library). Excluding it wiped the library to 14 songs. Fix: `NonMusicFolderClassifier` now treats a folder with ≥ 20 song-shaped files (1–10 min each) as a **music container** that must never be suggested; the detector counts song-shaped files across each folder's whole subtree before proposing anything. Also added `records` to the known non-music names (this device's meeting recordings live in `Music/Recorder/records`).
+
+**Verification (physical device, SDK 33, 1789-song library):** built + `lintDebug` (0 errors) + all unit tests green (**114**, incl. 42 new: `FolderRulesTest` 13, `NonMusicFolderClassifierTest` 18, `LibraryFolderMappersTest` 4, `TreePathResolverTest` 7). On device: first-run wizard suggests only genuine recording folders (12 internal + 4 SD card files); **Exclude recommended** purged exactly those 16 and the library went 1789 → **1773** with all music intact (SD library `…/Recordings (1)/Call till 21.11.24` fully preserved); the two EXCLUDED rules persist with correct resolved paths and `0 songs`; Add folder works end-to-end (SAF picker → system "Allow P-Music to access folder?" → type dialog → card appears); Remove and the full actions menu (Rename/Refresh/Open folder/Statistics/Move to Included) work; rules + library survive a force-stop restart (1773 songs, no wizard re-show); playback still starts from the Library after the lint-driven `@OptIn(UnstableApi)` fixes on `PlaybackService`/`PMusicMediaButtonReceiver` (session `STATE_PLAYING`, position advancing, media button receiver restored); logcat clean, no crashes.
+
 ## [0.14.0] - 2026-08-07
 
 ### Sprint 14 — File Management (`:features:filemanager`)

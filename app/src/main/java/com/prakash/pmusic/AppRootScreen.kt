@@ -38,6 +38,8 @@ import com.prakash.pmusic.features.search.ui.SearchScreen
 import com.prakash.pmusic.features.settings.ui.SettingsScreen
 import com.prakash.pmusic.features.statistics.ui.StatisticsScreen
 import com.prakash.pmusic.features.equalizer.ui.EqualizerScreen
+import com.prakash.pmusic.features.folders.ui.FolderManagerScreen
+import com.prakash.pmusic.features.folders.ui.FolderWizardHost
 
 /** Destinations of the bottom navigation shell. */
 enum class AppDestination(val label: String, val icon: ImageVector) {
@@ -70,6 +72,7 @@ fun AppRootScreen() {
     var showLyrics by rememberSaveable { mutableStateOf(false) }
     var showStatistics by rememberSaveable { mutableStateOf(false) }
     var showEqualizer by rememberSaveable { mutableStateOf(false) }
+    var showFolderManager by rememberSaveable { mutableStateOf(false) }
     var showFileDetails by rememberSaveable { mutableStateOf<Long?>(null) }
 
     val playerViewModel: PlayerViewModel = hiltViewModel()
@@ -93,6 +96,7 @@ fun AppRootScreen() {
                                     selected = destination
                                     showStatistics = false
                                     showEqualizer = false
+                                    showFolderManager = false
                                 },
                                 icon = {
                                     Icon(
@@ -119,13 +123,15 @@ fun AppRootScreen() {
                     AppDestination.PLAYLISTS -> PlaylistsScreen(onOpenFileDetails = { showFileDetails = it.id })
                     AppDestination.SETTINGS -> when {
                         showEqualizer -> EqualizerScreen(onBack = { showEqualizer = false })
+                        showFolderManager -> FolderManagerScreen(onBack = { showFolderManager = false })
                         showStatistics -> StatisticsScreen(
                             onBack = { showStatistics = false },
                             onOpenFileDetails = { showFileDetails = it.id }
                         )
                         else -> SettingsScreen(
                             onOpenStatistics = { showStatistics = true },
-                            onOpenEqualizer = { showEqualizer = true }
+                            onOpenEqualizer = { showEqualizer = true },
+                            onOpenFolderManager = { showFolderManager = true }
                         )
                     }
                 }
@@ -160,5 +166,8 @@ fun AppRootScreen() {
                 onDeleted = { showFileDetails = null }
             )
         }
+
+        // First-run folder-exclusion wizard; self-hiding after scan completes.
+        FolderWizardHost(onOpenFolderManager = { showFolderManager = true })
     }
 }

@@ -4,8 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
 import android.util.Log
+import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
@@ -30,6 +32,7 @@ import javax.inject.Inject
  *   (see the `:receiver` module).
  */
 @AndroidEntryPoint
+@OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
 
     companion object {

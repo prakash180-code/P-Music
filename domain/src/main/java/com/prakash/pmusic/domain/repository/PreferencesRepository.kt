@@ -29,4 +29,7 @@ interface PreferencesRepository {
 
     /** Persists the selected preset index, or -1 for a custom curve. */
     suspend fun setEqualizerPresetIndex(index: Int)
+
+    /** Marks the first-run folder-exclusion wizard as shown (or skipped). */
+    suspend fun setFolderWizardShown(shown: Boolean)
 }

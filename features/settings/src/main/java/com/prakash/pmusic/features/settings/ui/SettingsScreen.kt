@@ -1,6 +1,7 @@
 package com.prakash.pmusic.features.settings.ui
 
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -49,11 +50,13 @@ import com.prakash.pmusic.features.settings.SettingsViewModel
  *
  * @param onOpenStatistics opens the Statistics screen (hosted by the shell).
  * @param onOpenEqualizer opens the Equalizer screen (hosted by the shell).
+ * @param onOpenFolderManager opens the Library Folder Manager (hosted by the shell).
  */
 @Composable
 fun SettingsScreen(
     onOpenStatistics: () -> Unit = {},
     onOpenEqualizer: () -> Unit = {},
+    onOpenFolderManager: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val preferences by viewModel.preferences.collectAsState()
@@ -113,6 +116,11 @@ fun SettingsScreen(
 
             item {
                 SectionHeader("Library")
+                ValueRow(
+                    label = "Folder Manager",
+                    value = "View",
+                    onClick = onOpenFolderManager
+                )
                 ValueRow(
                     label = "Statistics",
                     value = "View",
@@ -240,10 +248,15 @@ private fun AboutRow() {
     val context = LocalContext.current
     val version = remember {
         runCatching {
-            context.packageManager.getPackageInfo(
-                context.packageName,
-                PackageManager.PackageInfoFlags.of(0L)
-            ).versionName
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.PackageInfoFlags.of(0L)
+                ).versionName
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName
+            }
         }.getOrNull() ?: "—"
     }
 

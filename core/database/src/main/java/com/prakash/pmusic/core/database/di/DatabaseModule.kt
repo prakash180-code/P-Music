@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.prakash.pmusic.core.database.Migrations
 import com.prakash.pmusic.core.database.PMusicDatabase
+import com.prakash.pmusic.core.database.dao.LibraryFolderDao
 import com.prakash.pmusic.core.database.dao.PlaylistDao
 import com.prakash.pmusic.core.database.dao.SongDao
 import dagger.Module
@@ -31,11 +32,19 @@ object DatabaseModule {
             context,
             PMusicDatabase::class.java,
             "pmusic.db"
-        ).addMigrations(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3).build()
+        ).addMigrations(
+            Migrations.MIGRATION_1_2,
+            Migrations.MIGRATION_2_3,
+            Migrations.MIGRATION_3_4
+        ).build()
 
     @Provides
     fun provideSongDao(database: PMusicDatabase): SongDao = database.songDao()
 
     @Provides
     fun providePlaylistDao(database: PMusicDatabase): PlaylistDao = database.playlistDao()
+
+    @Provides
+    fun provideLibraryFolderDao(database: PMusicDatabase): LibraryFolderDao =
+        database.libraryFolderDao()
 }

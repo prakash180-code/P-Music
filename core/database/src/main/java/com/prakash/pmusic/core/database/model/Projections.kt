@@ -59,3 +59,12 @@ data class SongMeta(
     val playCount: Int,
     val lastPlayedAt: Long?
 )
+
+/**
+ * Id + absolute file path pair used by the folder manager to purge songs
+ * inside a folder without loading the full entities.
+ */
+data class SongPath(
+    val id: Long,
+    val path: String
+)

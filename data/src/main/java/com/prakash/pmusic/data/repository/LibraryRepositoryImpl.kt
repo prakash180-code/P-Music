@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -38,6 +40,9 @@ class LibraryRepositoryImpl @Inject constructor(
 
     private val _scanState = MutableStateFlow<LibraryScanState>(LibraryScanState.Idle)
     override val scanState: StateFlow<LibraryScanState> = _scanState.asStateFlow()
+
+    /** Serialises scans so the MediaStore watcher and manual triggers never overlap. */
+    private val scanMutex = Mutex()
 
     override fun observeSongs(): Flow<List<Song>> =
         songDao.observeAllSongs().map { list -> list.map { it.toDomain() } }
@@ -70,8 +75,12 @@ class LibraryRepositoryImpl @Inject constructor(
         // Skip redundant rescans on every cold start unless requested.
         if (!force && songDao.count() > 0) return
 
-        _scanState.value = LibraryScanState.Scanning
+        // A scan already in flight (watcher + manual triggers) is a no-op so
+        // bursts of MediaStore events collapse into a single pass.
+        if (!scanMutex.tryLock()) return
+
         try {
+            _scanState.value = LibraryScanState.Scanning
             when (val outcome = scanner.scan()) {
                 is ScanOutcome.Success ->
                     _scanState.value = LibraryScanState.Complete(
@@ -85,6 +94,8 @@ class LibraryRepositoryImpl @Inject constructor(
             }
         } catch (exception: Exception) {
             _scanState.value = LibraryScanState.Failed(exception.message ?: "Scan failed")
+        } finally {
+            scanMutex.unlock()
         }
     }
 

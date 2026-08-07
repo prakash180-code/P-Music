@@ -54,4 +54,28 @@ object Migrations {
             db.execSQL("ALTER TABLE `playlists` ADD COLUMN `rule` TEXT")
         }
     }
+
+    /** v3 → v4: adds the library folder rules table. */
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `library_folders` (
+                    `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `folderPath` TEXT NOT NULL,
+                    `displayName` TEXT NOT NULL,
+                    `type` TEXT NOT NULL,
+                    `enabled` INTEGER NOT NULL,
+                    `recursive` INTEGER NOT NULL,
+                    `lastScanned` INTEGER,
+                    `songCount` INTEGER NOT NULL,
+                    `dateAdded` INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_library_folders_folderPath` ON `library_folders` (`folderPath`)"
+            )
+        }
+    }
 }

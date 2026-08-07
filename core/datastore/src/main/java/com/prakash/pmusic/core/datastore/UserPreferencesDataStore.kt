@@ -45,6 +45,7 @@ class UserPreferencesDataStore @Inject constructor(
         val EQUALIZER_ENABLED = booleanPreferencesKey("equalizer_enabled")
         val EQUALIZER_BAND_GAINS = stringPreferencesKey("equalizer_band_gains")
         val EQUALIZER_PRESET_INDEX = intPreferencesKey("equalizer_preset_index")
+        val FOLDER_WIZARD_SHOWN = booleanPreferencesKey("folder_wizard_shown")
     }
 
     /** Reactive snapshot of the current preferences. */
@@ -82,6 +83,10 @@ class UserPreferencesDataStore @Inject constructor(
         context.pmusicDataStore.edit { it[Keys.EQUALIZER_PRESET_INDEX] = index }
     }
 
+    suspend fun setFolderWizardShown(shown: Boolean) {
+        context.pmusicDataStore.edit { it[Keys.FOLDER_WIZARD_SHOWN] = shown }
+    }
+
     private fun Preferences.toAppPreferences(): AppPreferences {
         val themeName = this[Keys.THEME_MODE] ?: return AppPreferences()
         return AppPreferences(
@@ -93,7 +98,8 @@ class UserPreferencesDataStore @Inject constructor(
             equalizerEnabled = this[Keys.EQUALIZER_ENABLED] ?: false,
             equalizerBandGainsMb = this[Keys.EQUALIZER_BAND_GAINS]
                 ?.let(EqualizerGainsCodec::decode) ?: emptyList(),
-            equalizerPresetIndex = this[Keys.EQUALIZER_PRESET_INDEX] ?: -1
+            equalizerPresetIndex = this[Keys.EQUALIZER_PRESET_INDEX] ?: -1,
+            folderWizardShown = this[Keys.FOLDER_WIZARD_SHOWN] ?: false
         )
     }
 }

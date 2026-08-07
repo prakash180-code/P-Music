@@ -9,6 +9,7 @@ import com.prakash.pmusic.core.database.model.AlbumProjection
 import com.prakash.pmusic.core.database.model.ArtistProjection
 import com.prakash.pmusic.core.database.model.GenreProjection
 import com.prakash.pmusic.core.database.model.SongMeta
+import com.prakash.pmusic.core.database.model.SongPath
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -111,6 +112,10 @@ interface SongDao {
 
     @Query("SELECT id FROM songs")
     suspend fun getAllIds(): List<Long>
+
+    /** Id + path pairs, used by the folder manager for recursive purges. */
+    @Query("SELECT id, path FROM songs")
+    suspend fun getAllSongPaths(): List<SongPath>
 
     @Query("UPDATE songs SET isFavorite = :isFavorite WHERE id = :songId")
     suspend fun setFavorite(songId: Long, isFavorite: Boolean)

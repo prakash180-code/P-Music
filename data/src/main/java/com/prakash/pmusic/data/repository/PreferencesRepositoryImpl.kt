@@ -31,4 +31,6 @@ class PreferencesRepositoryImpl @Inject constructor(
     override suspend fun setEqualizerBandGainsMb(gains: List<Int>) = dataStore.setEqualizerBandGainsMb(gains)
 
     override suspend fun setEqualizerPresetIndex(index: Int) = dataStore.setEqualizerPresetIndex(index)
+
+    override suspend fun setFolderWizardShown(shown: Boolean) = dataStore.setFolderWizardShown(shown)
 }

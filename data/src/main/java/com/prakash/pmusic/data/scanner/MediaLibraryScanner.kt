@@ -8,8 +8,14 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
+import com.prakash.pmusic.core.database.dao.LibraryFolderDao
 import com.prakash.pmusic.core.database.dao.SongDao
+import com.prakash.pmusic.core.database.entity.LibraryFolderEntity
 import com.prakash.pmusic.core.database.entity.SongEntity
+import com.prakash.pmusic.data.mapper.toFolderType
+import com.prakash.pmusic.domain.model.FolderRules
+import com.prakash.pmusic.domain.model.FolderRulesMatcher
+import com.prakash.pmusic.domain.model.LibraryFolderType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -28,16 +34,25 @@ sealed interface ScanOutcome {
 /**
  * Reads the MediaStore audio catalogue and syncs it into the Room database.
  *
+ * Folder rules (see [LibraryFolderDao]) are applied before any metadata work:
+ * files inside an enabled EXCLUDED folder (or outside every enabled INCLUDED
+ * folder when restricted mode is on) are skipped while still reading the
+ * cursor, so they are never inserted, never genre/art-enriched, and their
+ * stale rows are removed by the pass below.
+ *
  * Performance notes (100k+ song libraries):
  * - The whole pass runs on [Dispatchers.IO].
+ * - Two lightweight cursor passes: the first collects allowed ids (2
+ *   columns), the second streams the full projection for allowed rows only.
  * - Upserts are chunked (1 000 rows) to keep transactions bounded.
- * - Stale-row deletion is done with bounded `IN (...)` chunks (900 ids) to
- *   stay under SQLite's parameter limit.
- * - Genre assignment uses one members query per genre instead of per song.
+ * - Stale-row deletion is done with bounded `IN (...)` chunks (900 ids).
+ * - Genre assignment uses one members query per genre instead of per song,
+ *   restricted to allowed songs.
  */
 @Singleton
 class MediaLibraryScanner @Inject constructor(
     private val songDao: SongDao,
+    private val folderDao: LibraryFolderDao,
     @ApplicationContext private val context: Context
 ) {
 
@@ -66,10 +81,68 @@ class MediaLibraryScanner @Inject constructor(
     }
 
     private suspend fun performScan(): ScanOutcome {
-        val albumArt = queryAlbumArtPaths()
-        val genreBySong = queryGenres()
+        val folders = folderDao.getAll()
+        val rules = rulesFrom(folders)
         val existingMeta = songDao.getSongMeta().associateBy { it.id }
-        val scannedIds = ArrayList<Long>(1024)
+
+        // Pass 1: decide which MediaStore ids may enter the library, without
+        // building any entity or enriching metadata for skipped files.
+        val allowedIds = collectAllowedIds(rules)
+
+        // Metadata enrichment happens only for allowed songs.
+        val genreBySong = queryGenres(allowedIds)
+        val albumArt = queryAlbumArtPaths()
+
+        // Pass 2: stream the full projection and build entities for allowed rows.
+        val scannedIds = upsertAllowedRows(allowedIds, existingMeta, genreBySong, albumArt)
+
+        val removedCount = removeStaleSongs(scannedIds)
+        updateFolderStats(folders)
+        return ScanOutcome.Success(songCount = scannedIds.size, removedCount = removedCount)
+    }
+
+    /** Enabled INCLUDED / EXCLUDED folder paths as a decision snapshot. */
+    private fun rulesFrom(folders: List<LibraryFolderEntity>): FolderRules {
+        val enabled = folders.filter { it.enabled }
+        return FolderRules(
+            included = enabled.filter { it.type.toFolderType() == LibraryFolderType.INCLUDED }
+                .map { it.folderPath },
+            excluded = enabled.filter { it.type.toFolderType() == LibraryFolderType.EXCLUDED }
+                .map { it.folderPath }
+        )
+    }
+
+    /** Pass 1: the set of song ids whose file path passes the folder rules. */
+    private fun collectAllowedIds(rules: FolderRules): HashSet<Long> {
+        val allowed = HashSet<Long>()
+        contentResolver.query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.DATA),
+            MediaStore.Audio.Media.IS_MUSIC + " != 0",
+            null,
+            null
+        )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+            val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+            while (cursor.moveToNext()) {
+                val path = cursor.getString(dataCol)
+                if (path.isNullOrBlank()) continue
+                if (FolderRulesMatcher.isAllowed(path, rules)) {
+                    allowed.add(cursor.getLong(idCol))
+                }
+            }
+        }
+        return allowed
+    }
+
+    /** Pass 2: upsert allowed rows in chunks; returns the scanned id list. */
+    private suspend fun upsertAllowedRows(
+        allowedIds: Set<Long>,
+        existingMeta: Map<Long, com.prakash.pmusic.core.database.model.SongMeta>,
+        genreBySong: Map<Long, String>,
+        albumArt: Map<Long, String?>
+    ): List<Long> {
+        val scannedIds = ArrayList<Long>(allowedIds.size)
         val batch = ArrayList<SongEntity>(CHUNK_SIZE)
 
         val projection = arrayOf(
@@ -121,6 +194,7 @@ class MediaLibraryScanner @Inject constructor(
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
+                if (id !in allowedIds) continue
                 val albumId = cursor.getLong(albumIdCol)
                 scannedIds += id
                 val meta = existingMeta[id]
@@ -149,8 +223,6 @@ class MediaLibraryScanner @Inject constructor(
                     skipCount = 0,
                     lastPlayedAt = meta?.lastPlayedAt,
                     isFavorite = meta?.isFavorite ?: false,
-                    // Sample rate / channel count are not MediaStore columns;
-                    // they can be enriched later on demand via MediaMetadataRetriever.
                     bitrate = cursor.getInt(bitrateCol),
                     sampleRate = 0,
                     channels = 0,
@@ -167,9 +239,7 @@ class MediaLibraryScanner @Inject constructor(
         if (batch.isNotEmpty()) {
             songDao.upsertAll(batch)
         }
-
-        val removedCount = removeStaleSongs(scannedIds)
-        return ScanOutcome.Success(songCount = scannedIds.size, removedCount = removedCount)
+        return scannedIds
     }
 
     /** Deletes rows whose MediaStore id no longer exists (files were removed). */
@@ -182,6 +252,18 @@ class MediaLibraryScanner @Inject constructor(
         val stale = dbIds - scannedIds.toHashSet()
         stale.chunked(DELETE_CHUNK_SIZE).forEach { chunk -> songDao.deleteByIds(chunk) }
         return stale.size
+    }
+
+    /** Refreshes per-folder song counts and last-scanned stamps after a scan. */
+    private suspend fun updateFolderStats(folders: List<LibraryFolderEntity>) {
+        val enabled = folders.filter { it.enabled }
+        if (enabled.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val paths = songDao.getAllSongPaths()
+        enabled.forEach { folder ->
+            val count = paths.count { FolderRulesMatcher.isUnder(it.path, folder.folderPath) }
+            folderDao.updateStats(folder.id, count, now)
+        }
     }
 
     /** albumId -> absolute path of the album artwork. */
@@ -207,8 +289,12 @@ class MediaLibraryScanner @Inject constructor(
         return result
     }
 
-    /** songId -> genre name. One members query per genre, not per song. */
-    private fun queryGenres(): Map<Long, String> {
+    /**
+     * songId -> genre name, restricted to [allowedIds] so excluded songs are
+     * never enriched. One members query per genre, not per song.
+     */
+    private fun queryGenres(allowedIds: Set<Long>): Map<Long, String> {
+        if (allowedIds.isEmpty()) return emptyMap()
         val result = HashMap<Long, String>()
         contentResolver.query(
             MediaStore.Audio.Genres.EXTERNAL_CONTENT_URI,
@@ -239,7 +325,10 @@ class MediaLibraryScanner @Inject constructor(
                     val memberIdCol =
                         members.getColumnIndexOrThrow(MediaStore.Audio.Genres.Members._ID)
                     while (members.moveToNext()) {
-                        result.putIfAbsent(members.getLong(memberIdCol), genreName)
+                        val memberId = members.getLong(memberIdCol)
+                        if (memberId in allowedIds) {
+                            result.putIfAbsent(memberId, genreName)
+                        }
                     }
                 }
             }

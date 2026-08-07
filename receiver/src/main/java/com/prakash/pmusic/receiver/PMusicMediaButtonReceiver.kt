@@ -1,5 +1,7 @@
 package com.prakash.pmusic.receiver
 
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaButtonReceiver
 
 /**
@@ -10,4 +12,5 @@ import androidx.media3.session.MediaButtonReceiver
  * media button intent to the active [MediaSessionService]. Subclassing it
  * simply gives the manifest a stable app-specific component to reference.
  */
+@OptIn(UnstableApi::class)
 class PMusicMediaButtonReceiver : MediaButtonReceiver()

@@ -39,6 +39,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.prakash.pmusic.core.ui.theme.PmusicTheme
+import com.prakash.pmusic.data.watcher.MediaStoreWatcher
 import com.prakash.pmusic.domain.model.AppPreferences
 import com.prakash.pmusic.domain.repository.LibraryRepository
 import com.prakash.pmusic.domain.repository.PlaybackController
@@ -73,12 +74,19 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var playbackController: PlaybackController
 
+    @Inject
+    lateinit var mediaStoreWatcher: MediaStoreWatcher
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
         // Bind to the playback service so controls are immediately usable.
         playbackController.connect()
+
+        // Watch MediaStore so library changes on the device (new/deleted
+        // songs) sync automatically without a manual refresh.
+        mediaStoreWatcher.start()
 
         setContent {
             val appPreferences by preferencesRepository.preferences
