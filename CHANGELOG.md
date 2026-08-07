@@ -2,6 +2,33 @@
 
 All notable changes to P-Music are documented here.
 
+## [0.11.0] - 2026-08-07
+
+### Sprint 11 — Equalizer (`:features:equalizer`)
+
+**New `:features:equalizer` module:**
+- `EqualizerViewModel` (Hilt) — a thin pass-through: observes the reactive `EqualizerState` from the playback controller and forwards enable / band-gain / preset / reset gestures to it.
+- `ui/EqualizerScreen.kt` — opened from Settings (header back + system back): an on/off switch, a preset picker dialog (device presets, radio-selected), a **Reset to flat** action, and one slider per band (60 Hz–14 kHz on the test device) with a `+/- dB` label. Sliders commit on gesture end (thumb follows the finger locally; the value is applied and persisted only when the drag finishes, so DataStore is not flooded). Renders an "This device does not expose an audio equalizer" fallback when `EqualizerState.supported` is false.
+
+**Domain (`:domain`):**
+- `EqualizerState` (supported, enabled, min/max gain in millibels, default gain, `EqualizerBand`s, preset names, selected preset index) and `EqualizerBand` (center frequency Hz + gain in millibels).
+- `PlaybackController` gained `equalizerState: StateFlow<EqualizerState>` plus `setEqualizerEnabled`, `setEqualizerBandGain`, `selectEqualizerPreset` and `resetEqualizer`.
+
+**Effect engine (`:service`):**
+- `AudioFxEqualizerEngine` (@Singleton) — single owner of the curve. Probes the device band/preset layout on the global output session (probe effect released immediately), then binds the real `android.media.audiofx.Equalizer` to the player's live audio session and applies the persisted curve the moment it binds. The UI can render and accept changes before audio ever plays; they are applied when the effect attaches.
+
+**Persistence (`:core:datastore` / `:data`):**
+- Three new DataStore keys — `equalizer_enabled`, `equalizer_band_gains`, `equalizer_preset_index` — with `EqualizerGainsCodec` (string-encoding the band-gain list), plumbed through `AppPreferences` and `PreferencesRepository`.
+
+**App shell (`:app`):**
+- New **Equalizer** row (with chevron) under the Settings "Playback" section; `AppRootScreen` hosts `EqualizerScreen` as an overlay when opened; version bumped to 0.11.0 (versionCode 11).
+
+**Critical audio-session fix (`:service`):**
+- The effect can only attach to the player's real audio session. `PlaybackService` originally forced a hard-coded session id onto the ExoPlayer, but Media3 built the AudioTrack on its own derived session — so when the engine created `Equalizer(0, staleId)` during playback, AudioFlinger threw **"Cannot create AudioTrack"** and the effect never registered (verified via `dumpsys media.audio_flinger`, which showed no effect chain on the session).
+- Fix: `PlaybackService.onCreate` now generates a valid id via `AudioManager.generateAudioSessionId()`, assigns it to the ExoPlayer (`setAudioSessionId`) and reports the same id to the engine before playback starts; `Player.Listener.onAudioSessionIdChanged` remains as a safety net.
+
+**Verification (physical device, SDK 33, 1789-song library):** built + lint + all unit tests green; Settings shows Version 0.11.0 and the Equalizer row; the screen renders the device's 5 bands / 10 presets; logcat confirms `ensureEffect() bound to session <id>` at service start and `dumpsys media.audio_flinger` shows the Equalizer **registered on the playing session with 1 active track**; the toggle flips the effect to `Enabled=y`; band gains and presets persist across restarts; previously a hard-coded session id broke binding entirely — now the effect chain is live on the player's session and there is no `Cannot create AudioTrack`; no crashes.
+
 ## [0.10.0] - 2026-08-07
 
 ### Sprint 10 — Playback Widget (`:features:widgets`)

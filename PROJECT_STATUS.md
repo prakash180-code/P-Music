@@ -2,7 +2,7 @@
 
 ## Current Sprint
 
-**Sprint 10: Widgets (`:features:widgets`)** — completed.
+**Sprint 11: Equalizer (`:features:equalizer`)** — completed.
 
 ## Completed Features
 
@@ -70,9 +70,18 @@
   - **App shell**: `:features:widgets` wired into `:app`; `PMusicApplication` connects the widget manager on process start (widget stays live after reinstalls/background kills); version bumped to 0.10.0 (versionCode 10).
   - Verified on device (1789-song library, Microsoft Launcher): widget placed on the home screen, idle + live states render (title/artist/progress/time advance while playing), play/pause toggles playback, next/prev step a 2-song queue, artwork tap opens the app, widget controls work from a cold app state, whole flow survives an APK reinstall, duplicate-bind guard, logcat clean.
 
+- **Sprint 11:**
+  - `:features:equalizer` module: `EqualizerViewModel` (thin pass-through to the shared `PlaybackController`) and `EqualizerScreen` — enable switch, device-preset picker dialog, Reset to flat, one gain slider per band with `+/- dB` labels, back handling, and an "unsupported device" fallback when the audio stack exposes no equalizer effect.
+  - `:domain`: `EqualizerState`/`EqualizerBand` models; `PlaybackController` gained `equalizerState` + `setEqualizerEnabled`/`setEqualizerBandGain`/`selectEqualizerPreset`/`resetEqualizer`.
+  - `:service`: `AudioFxEqualizerEngine` (@Singleton) owns the curve, probes the device band/preset layout on the global output session, binds the real `android.media.audiofx.Equalizer` to the player's live session, and re-applies the persisted curve on bind.
+  - `:core:datastore` + `:data`: `equalizer_enabled` / `equalizer_band_gains` (`EqualizerGainsCodec`) / `equalizer_preset_index` keys plumbed through `AppPreferences` and `PreferencesRepository`.
+  - Settings gained an Equalizer row (with chevron) hosted by `AppRootScreen`; version bumped to 0.11.0 (versionCode 11).
+  - **Audio-session fix**: forcing a hard-coded session id onto the ExoPlayer made Media3 derive a different AudioTrack session, so the effect's `Equalizer(0, staleId)` threw "Cannot create AudioTrack" and never registered. `PlaybackService` now generates a valid id (`AudioManager.generateAudioSessionId()`), assigns it to the player, and hands it to the engine before playback starts (player `onAudioSessionIdChanged` kept as a safety net).
+  - Verified on device (1789-song library): the effect binds at service start, `dumpsys media.audio_flinger` shows the Equalizer registered on the playing session with 1 active track, the toggle flips `Enabled`, band gains/presets persist across restarts, no crashes.
+
 ## Pending Features
 
-- Smart playlists, Lyrics, Equalizer.
+- Smart playlists, Lyrics.
 - File management.
 - Optional future modules (Wi-Fi sync, online search) — designed as pluggable, not built.
 
@@ -84,4 +93,4 @@
 
 ## Next Sprint
 
-**Sprint 11: Lyrics or Equalizer** (first remaining item from Pending Features).
+**Sprint 12: Lyrics** (first remaining item from Pending Features).
