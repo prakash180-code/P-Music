@@ -1,9 +1,11 @@
 package com.prakash.pmusic.data.di
 
 import com.prakash.pmusic.data.repository.LibraryRepositoryImpl
+import com.prakash.pmusic.data.repository.LyricsRepositoryImpl
 import com.prakash.pmusic.data.repository.PlaylistRepositoryImpl
 import com.prakash.pmusic.data.repository.PreferencesRepositoryImpl
 import com.prakash.pmusic.domain.repository.LibraryRepository
+import com.prakash.pmusic.domain.repository.LyricsRepository
 import com.prakash.pmusic.domain.repository.PlaylistRepository
 import com.prakash.pmusic.domain.repository.PreferencesRepository
 import dagger.Binds
@@ -31,4 +33,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindPlaylistRepository(impl: PlaylistRepositoryImpl): PlaylistRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindLyricsRepository(impl: LyricsRepositoryImpl): LyricsRepository
 }

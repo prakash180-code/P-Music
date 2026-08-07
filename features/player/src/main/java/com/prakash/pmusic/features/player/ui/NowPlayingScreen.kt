@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
@@ -73,7 +74,8 @@ fun NowPlayingScreen(
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
     onCycleSpeed: () -> Unit,
-    onJumpToIndex: (Int) -> Unit
+    onJumpToIndex: (Int) -> Unit,
+    onOpenLyrics: () -> Unit
 ) {
     val song = playbackState.currentSong
 
@@ -82,7 +84,7 @@ fun NowPlayingScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        NowPlayingTopBar(onDismiss = onDismiss)
+        NowPlayingTopBar(onDismiss = onDismiss, onOpenLyrics = onOpenLyrics)
 
         if (song == null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -165,9 +167,9 @@ fun NowPlayingScreen(
     }
 }
 
-/** Fixed top bar with a dismiss affordance and the screen title. */
+/** Fixed top bar with a dismiss affordance and a lyrics shortcut. */
 @Composable
-private fun NowPlayingTopBar(onDismiss: () -> Unit) {
+private fun NowPlayingTopBar(onDismiss: () -> Unit, onOpenLyrics: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -190,7 +192,13 @@ private fun NowPlayingTopBar(onDismiss: () -> Unit) {
             modifier = Modifier.weight(1f)
         )
         // Balances the dismiss button so the title stays centred.
-        Spacer(modifier = Modifier.size(48.dp))
+        IconButton(onClick = onOpenLyrics) {
+            Icon(
+                imageVector = Icons.Filled.MusicNote,
+                contentDescription = "Lyrics",
+                tint = MaterialTheme.colorScheme.onSurface
+            )
+        }
     }
 }
 

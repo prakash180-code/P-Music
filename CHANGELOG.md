@@ -2,6 +2,30 @@
 
 All notable changes to P-Music are documented here.
 
+## [0.12.0] - 2026-08-07
+
+### Sprint 12 — Lyrics (`:features:lyrics`)
+
+**New `:features:lyrics` module:**
+- `LyricsViewModel` (Hilt) — loads lyrics for the current song through `LyricsRepository` whenever the song changes (reload job keyed by song id, cancelled on change); re-exposes the live `PlaybackState` so the screen can highlight synced lines against the playhead.
+- `ui/LyricsScreen.kt` — full-screen lyrics overlay opened from Now Playing (system back returns there): header with back button and title, loading spinner, a "No lyrics found for this track" fallback, and two rendering modes:
+  - `SyncedLyrics` — a `LazyColumn` where the line whose timestamp is the latest at-or-before the playhead is highlighted (theme **primary**, bold) and auto-scrolled into view (`animateScrollToItem`); inactive lines use `onSurfaceVariant`.
+  - `PlainLyrics` — unsynced text bodies rendered as a scrollable, paragraph-split column.
+
+**Domain (`:domain`):**
+- `LyricLine` (optional `timestampMs` + text) and `Lyrics` (list of lines); `LyricsRepository.loadLyrics(song)` contract.
+
+**Parsing (`:data`):**
+- `LrcParser` — standard `.lrc` files: `[mm:ss.xx]` timestamps (1–3 fractional digits), multiple timestamps per line, the `[offset:+/-ms]` tag (applied and clamped), and plain unsynced lines without brackets.
+- `Id3LyricsParser` — parses the ID3 tag at the start of an MP3 (v2.2/2.3/2.4, extended headers, synchsafe sizes): **USLT** frames for plain lyrics (multi-frame bodies joined), **SYLT** frames for timestamped lines (ms format; MPEG-frame timestamps skipped). Handles all four text encodings; for UTF-16 it honors an explicit BOM and otherwise infers endianness from the first byte pair, since not every writer repeats the BOM before the lyric text.
+- `LyricsRepositoryImpl` (@Singleton) — offline sources in order: an LRC sidecar file next to the audio (`<song>.lrc`), then embedded ID3 USLT/SYLT; both reads are bounded (the ID3 tag is parsed from the first 256 KB only) and run on the IO dispatcher.
+- Tests: `LrcParserTest` (9 tests — timestamps, multiple tags, offset, plain lines) and `Id3LyricsParserTest` (10 tests — USLT/SYLT across encodings, incl. UTF-16 with BOM and a body that omits its own BOM).
+
+**App shell (`:app`):**
+- `NowPlayingTopBar` gained a **Lyrics** `IconButton` (top-right) that opens the overlay; `AppRootScreen` hosts `LyricsScreen` as a full-screen overlay when opened and resets it on nav-item taps; `:features:lyrics` dependency added; version bumped to 0.12.0 (versionCode 12).
+
+**Verification (physical device, SDK 33, 1789-song library):** built + `lintDebug` + all unit tests green (26 in `:data`); two synthetic tracks were scanned into MediaStore and verified — `Lyrics ID3 Test.mp3` (ID3v2.3 USLT in UTF-16 with a BOM) and `Lyrics LRC Test.mp3` with a 4-line sidecar `.lrc` timed at 0:00 / 2.50 / 5.25 / 8.00. The Now Playing lyrics button opens the overlay for both; embedded UTF-16 USLT lyrics render correctly, special characters and angle brackets included (`& <text> <here>`); for the LRC track the active line is highlighted in the theme primary colour while the rest render in the inactive grey, and screenshot pixel sampling across two points in time confirms the highlight advances with the playhead (line 3 at ~5 s, line 4 at ~9 s). `adb push` alone left the new files unindexed (`is_music=NULL`), so they were force-scanned via `content call scan_file` before the app picked them up. Test files and the temporary "Rescan on launch" toggle were removed after verification; logcat clean, no crashes.
+
 ## [0.11.0] - 2026-08-07
 
 ### Sprint 11 — Equalizer (`:features:equalizer`)

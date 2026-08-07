@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.prakash.pmusic.features.library.ui.LibraryScreen
+import com.prakash.pmusic.features.lyrics.ui.LyricsScreen
 import com.prakash.pmusic.features.player.PlayerViewModel
 import com.prakash.pmusic.features.player.ui.MiniPlayerBar
 import com.prakash.pmusic.features.player.ui.NowPlayingScreen
@@ -64,6 +65,7 @@ enum class AppDestination(val label: String, val icon: ImageVector) {
 fun AppRootScreen() {
     var selected by rememberSaveable { mutableStateOf(AppDestination.LIBRARY) }
     var showNowPlaying by rememberSaveable { mutableStateOf(false) }
+    var showLyrics by rememberSaveable { mutableStateOf(false) }
     var showStatistics by rememberSaveable { mutableStateOf(false) }
     var showEqualizer by rememberSaveable { mutableStateOf(false) }
 
@@ -135,8 +137,13 @@ fun AppRootScreen() {
                 onToggleShuffle = playerViewModel::toggleShuffle,
                 onCycleRepeat = playerViewModel::cycleRepeatMode,
                 onCycleSpeed = playerViewModel::cyclePlaybackSpeed,
-                onJumpToIndex = playerViewModel::jumpToQueueIndex
+                onJumpToIndex = playerViewModel::jumpToQueueIndex,
+                onOpenLyrics = { showLyrics = true }
             )
+        }
+
+        if (showLyrics) {
+            LyricsScreen(onBack = { showLyrics = false })
         }
     }
 }
