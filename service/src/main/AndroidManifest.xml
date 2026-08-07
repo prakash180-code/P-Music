@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Declares the media playback service and the permissions it needs.
+     These merge into the app manifest at build time. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Foreground playback service (notification-driven). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Required on API 34+ to start a mediaPlayback foreground service. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Keep the CPU awake during playback. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Show the playback notification on API 33+. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+        <!-- MediaSessionService hosts the ExoPlayer and Media Session.
+             exported=true lets system UI (lock screen, Bluetooth, Android Auto)
+             and the notification bind to it. -->
+        <service
+            android:name="com.prakash.pmusic.service.PlaybackService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback"
+            android:stopWithTask="false">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+    </application>
+
+</manifest>

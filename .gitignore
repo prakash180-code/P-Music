@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+
+# Local configuration files (machine specific)
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.hprof
+
+# Android
+captures/
+.externalNativeBuild/
+.cxx/
+*.keystore
+!debug.keystore
+
+# Misc
+.DS_Store
+Thumbs.db

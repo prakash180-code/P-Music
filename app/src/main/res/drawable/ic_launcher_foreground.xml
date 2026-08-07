@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Foreground layer of the launcher icon: two beamed eighth notes kept
+     inside the adaptive-icon safe zone (central 66x66 of the 108dp canvas). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Note head 1 (filled circle) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,58 A10,10 0 1 0 38,78 A10,10 0 1 0 38,58 Z" />
+    <!-- Note head 2 (filled circle) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M72,48 A10,10 0 1 0 72,68 A10,10 0 1 0 72,48 Z" />
+    <!-- Stem 1 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M42,58 L42,38 L46,38 L46,58 Z" />
+    <!-- Stem 2 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M76,48 L76,30 L80,30 L80,48 Z" />
+    <!-- Beam connecting both stems -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44,38 L78,30 L78,34 L44,42 Z" />
+</vector>

@@ -1,0 +1,66 @@
+package com.prakash.pmusic.domain.repository
+
+import com.prakash.pmusic.domain.model.EqualizerState
+import com.prakash.pmusic.domain.model.PlaybackState
+import com.prakash.pmusic.domain.model.RepeatMode
+import com.prakash.pmusic.domain.model.Song
+import kotlinx.coroutines.flow.StateFlow
+
+/**
+ * Contract for controlling playback and observing its state.
+ *
+ * Implementations connect to the app's media session and translate engine
+ * events into the framework-free [PlaybackState] model. The UI depends only
+ * on this interface, never on Media3 types.
+ */
+interface PlaybackController {
+
+    /** Live playback state. Always emits a valid (default) snapshot. */
+    val playbackState: StateFlow<PlaybackState>
+
+    /** Live equalizer state. Always emits a valid (default) snapshot. */
+    val equalizerState: StateFlow<EqualizerState>
+
+    /** Connects to the media session. Safe to call multiple times. */
+    fun connect()
+
+    /** Releases the media controller and stops observing state. */
+    fun disconnect()
+
+    /** Plays a single song, replacing the current queue. */
+    fun playSong(song: Song)
+
+    /** Plays [queue] starting at [startIndex]. */
+    fun playQueue(queue: List<Song>, startIndex: Int = 0)
+
+    fun pause()
+
+    fun togglePlayPause()
+
+    fun seekTo(positionMs: Long)
+
+    fun next()
+
+    fun previous()
+
+    /** Jumps directly to the queue item at [index], keeping the queue intact. */
+    fun jumpToQueueIndex(index: Int)
+
+    fun setShuffleEnabled(enabled: Boolean)
+
+    fun setRepeatMode(mode: RepeatMode)
+
+    fun setPlaybackSpeed(speed: Float)
+
+    /** Turns the equalizer on or off. */
+    fun setEqualizerEnabled(enabled: Boolean)
+
+    /** Sets [band]'s gain to [gainMb] millibels, switching to a custom curve. */
+    fun setEqualizerBandGain(band: Int, gainMb: Int)
+
+    /** Applies the preset at [presetIndex] in [EqualizerState.presetNames]. */
+    fun selectEqualizerPreset(presetIndex: Int)
+
+    /** Resets every band to neutral and clears the preset selection. */
+    fun resetEqualizer()
+}

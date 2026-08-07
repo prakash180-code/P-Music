@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Declares the media button receiver. It handles ACTION_MEDIA_BUTTON
+     (headset/hardware buttons) and the notification's play/pause/seek taps,
+     forwarding them to the playback service via Media3. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <receiver
+            android:name="com.prakash.pmusic.receiver.PMusicMediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

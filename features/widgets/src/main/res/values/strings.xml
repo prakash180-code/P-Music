@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_label">P-Music</string>
+    <string name="widget_description">Playback controls</string>
+    <string name="widget_default_title">P-Music</string>
+    <string name="widget_default_subtitle">No music playing</string>
+    <string name="widget_artwork_desc">Album artwork</string>
+    <string name="widget_prev_desc">Previous</string>
+    <string name="widget_play_pause_desc">Play or pause</string>
+    <string name="widget_next_desc">Next</string>
+</resources>
