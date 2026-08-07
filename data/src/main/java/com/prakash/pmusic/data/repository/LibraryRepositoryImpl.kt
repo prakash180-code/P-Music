@@ -1,22 +1,26 @@
 package com.prakash.pmusic.data.repository
 
 import com.prakash.pmusic.core.database.dao.SongDao
+import com.prakash.pmusic.data.file.AudioFileMetadataReader
 import com.prakash.pmusic.data.mapper.toDomain
 import com.prakash.pmusic.data.scanner.MediaLibraryScanner
 import com.prakash.pmusic.data.scanner.ScanOutcome
 import com.prakash.pmusic.domain.model.Album
 import com.prakash.pmusic.domain.model.Artist
+import com.prakash.pmusic.domain.model.AudioFileDetails
 import com.prakash.pmusic.domain.model.Genre
 import com.prakash.pmusic.domain.model.LibraryScanState
 import com.prakash.pmusic.domain.model.Song
 import com.prakash.pmusic.domain.repository.LibraryRepository
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
 /**
  * Room-backed implementation of [LibraryRepository].
@@ -28,7 +32,8 @@ import kotlinx.coroutines.flow.map
 @Singleton
 class LibraryRepositoryImpl @Inject constructor(
     private val songDao: SongDao,
-    private val scanner: MediaLibraryScanner
+    private val scanner: MediaLibraryScanner,
+    private val metadataReader: AudioFileMetadataReader
 ) : LibraryRepository {
 
     private val _scanState = MutableStateFlow<LibraryScanState>(LibraryScanState.Idle)
@@ -36,6 +41,9 @@ class LibraryRepositoryImpl @Inject constructor(
 
     override fun observeSongs(): Flow<List<Song>> =
         songDao.observeAllSongs().map { list -> list.map { it.toDomain() } }
+
+    override fun observeSong(songId: Long): Flow<Song?> =
+        songDao.observeSong(songId).map { it?.toDomain() }
 
     override fun observeAlbums(): Flow<List<Album>> =
         songDao.observeAlbums().map { list -> list.map { it.toDomain() } }
@@ -86,5 +94,17 @@ class LibraryRepositoryImpl @Inject constructor(
 
     override suspend fun recordPlay(songId: Long) {
         songDao.recordPlay(songId, System.currentTimeMillis())
+    }
+
+    override suspend fun readFileDetails(song: Song): AudioFileDetails? =
+        withContext(Dispatchers.IO) {
+            metadataReader.read(song)
+        }
+
+    override suspend fun deleteSongsFromDatabase(songs: List<Song>) {
+        if (songs.isEmpty()) return
+        withContext(Dispatchers.IO) {
+            songDao.deleteByIds(songs.map { it.id })
+        }
     }
 }

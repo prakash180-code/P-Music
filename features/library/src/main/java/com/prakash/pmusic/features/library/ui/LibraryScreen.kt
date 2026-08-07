@@ -80,6 +80,7 @@ enum class LibraryTab(val label: String) {
  */
 @Composable
 fun LibraryScreen(
+    onOpenFileDetails: (Song) -> Unit,
     viewModel: LibraryViewModel = hiltViewModel()
 ) {
     val songs by viewModel.songs.collectAsState()
@@ -108,7 +109,8 @@ fun LibraryScreen(
             onBack = viewModel::closeDetail,
             onPlayAll = { viewModel.playQueue(currentDetail.songs, 0) },
             onPlayQueue = viewModel::playQueue,
-            onToggleFavorite = viewModel::toggleFavorite
+            onToggleFavorite = viewModel::toggleFavorite,
+            onOpenFileDetails = onOpenFileDetails
         )
         return
     }
@@ -134,7 +136,8 @@ fun LibraryScreen(
         onOpenAlbum = viewModel::openAlbum,
         onOpenArtist = viewModel::openArtist,
         onOpenGenre = viewModel::openGenre,
-        onRefresh = viewModel::refresh
+        onRefresh = viewModel::refresh,
+        onOpenFileDetails = onOpenFileDetails
     )
 }
 
@@ -167,7 +170,8 @@ fun LibraryScreenContent(
     onOpenAlbum: (Long) -> Unit,
     onOpenArtist: (Long) -> Unit,
     onOpenGenre: (String) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onOpenFileDetails: (Song) -> Unit
 ) {
     val isSearching = query.isNotBlank()
 
@@ -204,7 +208,9 @@ fun LibraryScreenContent(
                     }
                 LibraryScanState.Scanning -> "Scanning your library…"
                 LibraryScanState.NoPermission -> "Media access is required"
-                is LibraryScanState.Complete -> "${scanState.songCount} songs in your library"
+                // Use the live Room count, not the last scan's snapshot, so
+                // library changes (e.g. deleting a song) reflect immediately.
+                is LibraryScanState.Complete -> "${songs.size} songs in your library"
                 is LibraryScanState.Failed -> "Scan failed: ${scanState.message}"
             },
             isScanning = scanState is LibraryScanState.Scanning,
@@ -241,7 +247,8 @@ fun LibraryScreenContent(
                     onPlaySong = onPlaySong,
                     onPlayQueue = onPlayQueue,
                     onToggleFavorite = onToggleFavorite,
-                    onRefresh = onRefresh
+                    onRefresh = onRefresh,
+                    onOpenFileDetails = onOpenFileDetails
                 )
 
                 LibraryTab.ALBUMS -> if (albums.isEmpty()) {
@@ -301,7 +308,8 @@ private fun LibraryDetailScreen(
     onBack: () -> Unit,
     onPlayAll: () -> Unit,
     onPlayQueue: (List<Song>, Int) -> Unit,
-    onToggleFavorite: (Song) -> Unit
+    onToggleFavorite: (Song) -> Unit,
+    onOpenFileDetails: (Song) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -353,7 +361,8 @@ private fun LibraryDetailScreen(
                     isCurrent = song.id == currentSongId,
                     isPlaying = isPlaying,
                     onClick = { onPlayQueue(detail.songs, detail.songs.indexOf(song)) },
-                    onToggleFavorite = { onToggleFavorite(song) }
+                    onToggleFavorite = { onToggleFavorite(song) },
+                    onFileDetails = { onOpenFileDetails(song) }
                 )
             }
         }
@@ -455,7 +464,8 @@ private fun SongsContent(
     onPlaySong: (Song) -> Unit,
     onPlayQueue: (List<Song>, Int) -> Unit,
     onToggleFavorite: (Song) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onOpenFileDetails: (Song) -> Unit
 ) {
     if (songs.isEmpty()) {
         EmptyLibrary(scanState = scanState, onRefresh = onRefresh)
@@ -502,7 +512,8 @@ private fun SongsContent(
                     isCurrent = song.id == currentSongId,
                     isPlaying = isPlaying,
                     onClick = { onPlayQueue(filteredSongs, filteredSongs.indexOf(song)) },
-                    onToggleFavorite = { onToggleFavorite(song) }
+                    onToggleFavorite = { onToggleFavorite(song) },
+                    onFileDetails = { onOpenFileDetails(song) }
                 )
             }
         }
@@ -588,6 +599,7 @@ private fun scanStatusText(scanState: LibraryScanState): String = when (scanStat
     LibraryScanState.Idle -> "Ready to scan your music"
     LibraryScanState.Scanning -> "Scanning your library…"
     LibraryScanState.NoPermission -> "Media access is required"
-    is LibraryScanState.Complete -> "${scanState.songCount} songs in your library"
+    // Only ever shown when the library is empty, so a count would be "0".
+    is LibraryScanState.Complete -> "Your library is empty"
     is LibraryScanState.Failed -> "Scan failed: ${scanState.message}"
 }

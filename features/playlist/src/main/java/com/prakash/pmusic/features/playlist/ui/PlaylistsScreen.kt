@@ -81,7 +81,10 @@ import kotlin.math.roundToInt
  * callbacks, keeping the UI stateless and easy to preview.
  */
 @Composable
-fun PlaylistsScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
+fun PlaylistsScreen(
+    onOpenFileDetails: (Song) -> Unit,
+    viewModel: PlaylistViewModel = hiltViewModel()
+) {
     val playlists by viewModel.playlists.collectAsState()
     val selectedPlaylist by viewModel.selectedPlaylist.collectAsState()
     val songs by viewModel.playlistSongs.collectAsState()
@@ -121,7 +124,8 @@ fun PlaylistsScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
             onRemoveSong = { songId -> viewModel.removeSong(selected.id, songId) },
             onMoveUp = { index -> viewModel.moveSong(selected.id, index, index - 1) },
             onMoveDown = { index -> viewModel.moveSong(selected.id, index, index + 1) },
-            onReorder = { ordered -> viewModel.reorder(selected.id, ordered) }
+            onReorder = { ordered -> viewModel.reorder(selected.id, ordered) },
+            onOpenFileDetails = onOpenFileDetails
         )
     }
 }
@@ -267,7 +271,8 @@ private fun PlaylistDetailContent(
     onRemoveSong: (Long) -> Unit,
     onMoveUp: (Int) -> Unit,
     onMoveDown: (Int) -> Unit,
-    onReorder: (List<Long>) -> Unit
+    onReorder: (List<Long>) -> Unit,
+    onOpenFileDetails: (Song) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -373,7 +378,8 @@ private fun PlaylistDetailContent(
                     onMoveUp = onMoveUp,
                     onMoveDown = onMoveDown,
                     onRemove = onRemoveSong,
-                    onReorder = onReorder
+                    onReorder = onReorder,
+                    onOpenFileDetails = onOpenFileDetails
                 )
             }
         }
@@ -410,7 +416,8 @@ private fun PlaylistSongList(
     onMoveUp: (Int) -> Unit,
     onMoveDown: (Int) -> Unit,
     onRemove: (Long) -> Unit,
-    onReorder: (List<Long>) -> Unit
+    onReorder: (List<Long>) -> Unit,
+    onOpenFileDetails: (Song) -> Unit
 ) {
     val listState = rememberLazyListState()
     var displaySongs by remember { mutableStateOf(songs) }
@@ -483,7 +490,8 @@ private fun PlaylistSongList(
                 onClick = { onPlayAt(index) },
                 onMoveUp = { onMoveUp(index) },
                 onMoveDown = { onMoveDown(index) },
-                onRemove = { onRemove(song.id) }
+                onRemove = { onRemove(song.id) },
+                onFileDetails = { onOpenFileDetails(song) }
             )
         }
     }

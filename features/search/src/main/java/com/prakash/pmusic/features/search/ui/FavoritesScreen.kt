@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.prakash.pmusic.core.ui.component.SongRow
+import com.prakash.pmusic.domain.model.Song
 import com.prakash.pmusic.features.search.FavoritesViewModel
 
 /**
@@ -36,6 +37,7 @@ import com.prakash.pmusic.features.search.FavoritesViewModel
  */
 @Composable
 fun FavoritesScreen(
+    onOpenFileDetails: (Song) -> Unit,
     viewModel: FavoritesViewModel = hiltViewModel()
 ) {
     val favorites by viewModel.favorites.collectAsState()
@@ -98,7 +100,8 @@ fun FavoritesScreen(
                     isCurrent = song.id == playbackState.currentSong?.id,
                     isPlaying = playbackState.isPlaying,
                     onClick = { viewModel.playQueue(favorites, favorites.indexOf(song)) },
-                    onToggleFavorite = { viewModel.toggleFavorite(song) }
+                    onToggleFavorite = { viewModel.toggleFavorite(song) },
+                    onFileDetails = { onOpenFileDetails(song) }
                 )
             }
         }

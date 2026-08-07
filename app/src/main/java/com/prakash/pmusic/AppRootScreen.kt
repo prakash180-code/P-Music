@@ -25,8 +25,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.prakash.pmusic.domain.model.Song
 import com.prakash.pmusic.features.library.ui.LibraryScreen
 import com.prakash.pmusic.features.lyrics.ui.LyricsScreen
+import com.prakash.pmusic.features.filemanager.ui.FileDetailsScreen
 import com.prakash.pmusic.features.player.PlayerViewModel
 import com.prakash.pmusic.features.player.ui.MiniPlayerBar
 import com.prakash.pmusic.features.player.ui.NowPlayingScreen
@@ -68,6 +70,7 @@ fun AppRootScreen() {
     var showLyrics by rememberSaveable { mutableStateOf(false) }
     var showStatistics by rememberSaveable { mutableStateOf(false) }
     var showEqualizer by rememberSaveable { mutableStateOf(false) }
+    var showFileDetails by rememberSaveable { mutableStateOf<Long?>(null) }
 
     val playerViewModel: PlayerViewModel = hiltViewModel()
     val playbackState by playerViewModel.playbackState.collectAsState()
@@ -110,13 +113,16 @@ fun AppRootScreen() {
                     .padding(innerPadding)
             ) {
                 when (selected) {
-                    AppDestination.LIBRARY -> LibraryScreen()
-                    AppDestination.SEARCH -> SearchScreen()
-                    AppDestination.FAVORITES -> FavoritesScreen()
-                    AppDestination.PLAYLISTS -> PlaylistsScreen()
+                    AppDestination.LIBRARY -> LibraryScreen(onOpenFileDetails = { showFileDetails = it.id })
+                    AppDestination.SEARCH -> SearchScreen(onOpenFileDetails = { showFileDetails = it.id })
+                    AppDestination.FAVORITES -> FavoritesScreen(onOpenFileDetails = { showFileDetails = it.id })
+                    AppDestination.PLAYLISTS -> PlaylistsScreen(onOpenFileDetails = { showFileDetails = it.id })
                     AppDestination.SETTINGS -> when {
                         showEqualizer -> EqualizerScreen(onBack = { showEqualizer = false })
-                        showStatistics -> StatisticsScreen(onBack = { showStatistics = false })
+                        showStatistics -> StatisticsScreen(
+                            onBack = { showStatistics = false },
+                            onOpenFileDetails = { showFileDetails = it.id }
+                        )
                         else -> SettingsScreen(
                             onOpenStatistics = { showStatistics = true },
                             onOpenEqualizer = { showEqualizer = true }
@@ -144,6 +150,15 @@ fun AppRootScreen() {
 
         if (showLyrics) {
             LyricsScreen(onBack = { showLyrics = false })
+        }
+
+        val fileDetailsSongId = showFileDetails
+        if (fileDetailsSongId != null) {
+            FileDetailsScreen(
+                songId = fileDetailsSongId,
+                onBack = { showFileDetails = null },
+                onDeleted = { showFileDetails = null }
+            )
         }
     }
 }

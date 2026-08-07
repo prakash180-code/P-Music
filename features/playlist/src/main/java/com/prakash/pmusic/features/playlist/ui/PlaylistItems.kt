@@ -157,7 +157,8 @@ fun PlaylistSongRow(
     onClick: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onFileDetails: (() -> Unit)? = null
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -214,7 +215,7 @@ fun PlaylistSongRow(
                 modifier = Modifier.size(18.dp)
             )
         }
-        if (!readOnly) {
+        if (!readOnly || onFileDetails != null) {
             Box {
                 IconButton(onClick = { menuExpanded = true }) {
                     Icon(
@@ -226,29 +227,40 @@ fun PlaylistSongRow(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false }
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("Move up") },
-                        enabled = index > 0,
-                        onClick = {
-                            menuExpanded = false
-                            onMoveUp()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Move down") },
-                        enabled = index < total - 1,
-                        onClick = {
-                            menuExpanded = false
-                            onMoveDown()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Remove") },
-                        onClick = {
-                            menuExpanded = false
-                            onRemove()
-                        }
-                    )
+                    if (onFileDetails != null) {
+                        DropdownMenuItem(
+                            text = { Text("File details") },
+                            onClick = {
+                                menuExpanded = false
+                                onFileDetails()
+                            }
+                        )
+                    }
+                    if (!readOnly) {
+                        DropdownMenuItem(
+                            text = { Text("Move up") },
+                            enabled = index > 0,
+                            onClick = {
+                                menuExpanded = false
+                                onMoveUp()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Move down") },
+                            enabled = index < total - 1,
+                            onClick = {
+                                menuExpanded = false
+                                onMoveDown()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Remove") },
+                            onClick = {
+                                menuExpanded = false
+                                onRemove()
+                            }
+                        )
+                    }
                 }
             }
         }

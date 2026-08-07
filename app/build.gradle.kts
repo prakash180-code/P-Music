@@ -20,8 +20,8 @@ android {
         applicationId = "com.prakash.pmusic"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.13.0"
+        versionCode = 14
+        versionName = "0.14.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -75,6 +75,7 @@ dependencies {
     implementation(project(":features:statistics"))
     implementation(project(":features:equalizer"))
     implementation(project(":features:lyrics"))
+    implementation(project(":features:filemanager"))
     implementation(project(":features:widgets"))
 
     // AndroidX

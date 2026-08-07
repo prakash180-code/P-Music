@@ -60,6 +60,7 @@ import com.prakash.pmusic.features.search.SearchViewModel
  */
 @Composable
 fun SearchScreen(
+    onOpenFileDetails: (Song) -> Unit,
     viewModel: SearchViewModel = hiltViewModel()
 ) {
     val query by viewModel.query.collectAsState()
@@ -101,6 +102,7 @@ fun SearchScreen(
                 isPlaying = playbackState.isPlaying,
                 onPlayQueue = viewModel::playQueue,
                 onToggleFavorite = viewModel::toggleFavorite,
+                onOpenFileDetails = onOpenFileDetails,
                 onCommit = viewModel::commitQuery
             )
         }
@@ -250,6 +252,7 @@ private fun SearchResultsContent(
     isPlaying: Boolean,
     onPlayQueue: (List<Song>, Int) -> Unit,
     onToggleFavorite: (Song) -> Unit,
+    onOpenFileDetails: (Song) -> Unit,
     onCommit: () -> Unit
 ) {
     if (results.isEmpty) {
@@ -290,7 +293,8 @@ private fun SearchResultsContent(
                         onCommit()
                         onPlayQueue(results.songs, results.songs.indexOf(song))
                     },
-                    onToggleFavorite = { onToggleFavorite(song) }
+                    onToggleFavorite = { onToggleFavorite(song) },
+                    onFileDetails = { onOpenFileDetails(song) }
                 )
             }
         }

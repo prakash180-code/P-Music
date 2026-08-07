@@ -2,6 +2,7 @@ package com.prakash.pmusic.domain.repository
 
 import com.prakash.pmusic.domain.model.Album
 import com.prakash.pmusic.domain.model.Artist
+import com.prakash.pmusic.domain.model.AudioFileDetails
 import com.prakash.pmusic.domain.model.Genre
 import com.prakash.pmusic.domain.model.LibraryScanState
 import com.prakash.pmusic.domain.model.Song
@@ -21,6 +22,9 @@ interface LibraryRepository {
     val scanState: StateFlow<LibraryScanState>
 
     fun observeSongs(): Flow<List<Song>>
+
+    /** Reactive single-song read (null once the row is deleted). */
+    fun observeSong(songId: Long): Flow<Song?>
 
     fun observeAlbums(): Flow<List<Album>>
 
@@ -49,4 +53,19 @@ interface LibraryRepository {
 
     /** Records a play on [songId]: bumps its play count and last-played time. */
     suspend fun recordPlay(songId: Long)
+
+    /**
+     * Reads the audio file's container headers to enrich the details that
+     * MediaStore does not index (sample rate, channel count, bitrate).
+     *
+     * Returns null when the file cannot be read or no audio track is found,
+     * so the caller can fall back to the indexed values.
+     */
+    suspend fun readFileDetails(song: Song): AudioFileDetails?
+
+    /**
+     * Removes [songs] from the Room library after their files have been
+     * deleted from MediaStore. Playlist membership cascades automatically.
+     */
+    suspend fun deleteSongsFromDatabase(songs: List<Song>)
 }

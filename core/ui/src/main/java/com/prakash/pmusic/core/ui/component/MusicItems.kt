@@ -18,12 +18,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,7 +50,11 @@ import com.prakash.pmusic.domain.model.Song
  * previewable and independent of any ViewModel.
  */
 
-/** Full-width song row with artwork, metadata and a favorite toggle. */
+/**
+ * Full-width song row with artwork, metadata, a favorite toggle and an
+ * optional overflow menu. When [onFileDetails] is null the overflow button is
+ * hidden, so existing callers are unaffected.
+ */
 @Composable
 fun SongRow(
     song: Song,
@@ -51,8 +62,11 @@ fun SongRow(
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    onFileDetails: (() -> Unit)? = null
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -96,6 +110,28 @@ fun SongRow(
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(20.dp)
             )
+        }
+        if (onFileDetails != null) {
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(
+                        imageVector = Icons.Filled.MoreVert,
+                        contentDescription = "Options for ${song.title}"
+                    )
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("File details") },
+                        onClick = {
+                            menuExpanded = false
+                            onFileDetails()
+                        }
+                    )
+                }
+            }
         }
         IconButton(onClick = onToggleFavorite) {
             Icon(

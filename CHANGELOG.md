@@ -2,6 +2,37 @@
 
 All notable changes to P-Music are documented here.
 
+## [0.14.0] - 2026-08-07
+
+### Sprint 14 — File Management (`:features:filemanager`)
+
+**New `:features:filemanager` module:**
+- `FileDetailsViewModel` (Hilt) — observes the selected song reactively from Room (`LibraryRepository.observeSong` via `flatMapLatest`, so the row disappears the moment it is deleted) and enriches it once on open with the container details MediaStore does not index; exposes `deleting` / `deleted` state and drives the Room purge after the system deletion is confirmed.
+- `ui/FileDetailsScreen.kt` — full-screen overlay (header back + system back): artwork + title/artist header, a metadata card (`DetailRow` label/value rows), and a red **Delete from device** button. The delete flow is: in-app confirmation dialog → **API 30+** `MediaStore.createDeleteRequest` system confirmation launched via `StartIntentSenderForResult` (Room is purged only on `RESULT_OK`, cancelled otherwise); **below API 30** it falls back to a direct `ContentResolver.delete`; failures show a "Could not delete" dialog.
+- `FileFormat.kt` — pure, unit-tested helpers: `resolveFileDetails` (prefers freshly extracted values, falls back to indexed ones so zeros never hide real data), `detailRows` (Format/Size/Duration/Bitrate/Sample rate/Channels/Year/Genre/Track/Plays/Date added/Date modified/Path), `formatBytes`, `formatDuration`, `formatBitrate`, `formatSampleRate`, `formatChannelCount`, `formatDate`.
+- `FileFormatTest` — 16 tests (bytes/duration/bitrate/sample rate/channels/date formatting, extraction-vs-fallback resolution, row rendering incl. unknown-row suppression).
+- `AndroidManifest.xml` + `build.gradle.kts` (depends on `:core:ui` and `:domain` only; no `:data` dependency — the delete request is built in the feature from the song's content Uri) and registration in `settings.gradle.kts`.
+
+**Domain (`:domain`):**
+- `AudioFileDetails` (sampleRateHz, channelCount, bitrate, mimeType); `LibraryRepository` gained `observeSong(songId): Flow<Song?>`, `readFileDetails(song)` and `deleteSongsFromDatabase(songs)`.
+
+**Data (`:data`):**
+- `AudioFileMetadataReader` (@Singleton) — `MediaExtractor` over the song's content Uri, reading the first audio track's `KEY_SAMPLE_RATE` / `KEY_CHANNEL_COUNT` / `KEY_BIT_RATE` / `KEY_MIME`; returns null on any failure so callers fall back.
+- `LibraryRepositoryImpl` now injects the reader; `readFileDetails` runs on `Dispatchers.IO`, `deleteSongsFromDatabase` deletes by id (playlist membership cascades via FK).
+
+**Shared UI (`:core:ui`):**
+- `SongRow` gained an optional `onFileDetails` callback: when set, a MoreVert overflow menu ("File details") appears next to the favorite toggle; when null (existing callers) nothing changes.
+- `PlaylistSongRow` gained `onFileDetails`; its overflow now renders "File details" for read-only smart playlists too (move/remove stay hidden there).
+
+**App shell (`:app`):**
+- `AppRootScreen` hosts `FileDetailsScreen` as a full-screen overlay (`showFileDetails: Long?` state, reset on nav taps and after a successful delete) and threads `onOpenFileDetails = { showFileDetails = it.id }` through Library, Search, Favorites, Playlists and Statistics.
+- Version bumped to 0.14.0 (versionCode 14).
+
+**Library count fix (`:features:library`):**
+- The header subtitle used `scanState.songCount` — the last scan's snapshot, which went stale as soon as the library changed afterwards (deleting a song exposed this: the list updated but the count did not). It now always uses the live `songs.size`; the empty-state helper no longer prints a stale positive count.
+
+**Verification (physical device, SDK 33, 1789-song library):** built + `lintDebug` (0 errors) + all unit tests green (72, incl. 16 in `:features:filemanager`). File details opens from the Library All Songs list, Favorites, and a smart-playlist detail (read-only rows show only "File details"), rendering path/size/duration/bitrate/sample rate/channels via the extractor (e.g. a recorded call: 48 kHz / Mono / 64 kbps, and a generated test WAV: 86.2 KB / 00:01) with unknown rows hidden. Delete was exercised end-to-end on a disposable test WAV: in-app confirm → system "Allow P-Music to delete this audio file?" dialog → Allow removed the file from disk (`/sdcard/Music/…` gone) and purged the Room row (library 1790 → 1789, live in the header after the count fix), with the search results dropping the row immediately; the device library and the Favorites smart playlist (`Favorites · 2`) were left untouched. Logcat clean, no crashes.
+
 ## [0.13.0] - 2026-08-07
 
 ### Sprint 13 — Smart playlists (`:features:playlist`)

@@ -2,7 +2,7 @@
 
 ## Current Sprint
 
-**Sprint 13: Smart playlists (`:features:playlist`)** — completed.
+**Sprint 14: File management (`:features:filemanager`)** — completed.
 
 ## Completed Features
 
@@ -87,17 +87,25 @@
   - `SmartPlaylistRuleTest` (12 tests, `:domain`); version bumped to 0.13.0 (versionCode 13).
   - Verified on device (1789-song library, real v2→v3 migration): no Room errors on upgrade; `Favorites · 2` smart playlist live-updates 2→1→2 when favorites are toggled; Genre dropdown path works (`Genre · Unknown · 1789`); manual playlists keep their editable behavior; delete works for both types; rule persists across force-stop restart; logcat clean, no crashes.
 
+- **Sprint 14:**
+  - New `:features:filemanager` module (depends on `:core:ui` + `:domain` only): `FileDetailsViewModel` (reactive single-song observe + one-time on-demand enrichment), `FileDetailsScreen` (artwork/header, metadata card, red **Delete from device** button → in-app confirm → API 30+ `MediaStore.createDeleteRequest` system dialog via `StartIntentSenderForResult`, <30 `ContentResolver.delete` fallback, error dialog), pure `FileFormat` helpers (resolve/details/bytes/duration/bitrate/sample rate/channels/date) + 16 unit tests.
+  - `:domain`: `AudioFileDetails` model; `LibraryRepository` gained `observeSong` / `readFileDetails` / `deleteSongsFromDatabase`.
+  - `:data`: `AudioFileMetadataReader` (@Singleton `MediaExtractor` over the song content Uri — sample rate, channel count, bitrate, mime; null on failure) wired into `LibraryRepositoryImpl`.
+  - Shared UI: `SongRow` and `PlaylistSongRow` gained an optional "File details" overflow menu (smart-playlist rows show it even though move/remove stay hidden).
+  - `AppRootScreen` hosts the File details overlay and threads `onOpenFileDetails` through Library, Search, Favorites, Playlists and Statistics; version bumped to 0.14.0 (versionCode 14).
+  - **Library count fix**: the header subtitle previously used the last scan's frozen `scanState.songCount`; it now uses the live `songs.size`, so the count reflects deletions immediately.
+  - Verified on device (1789-song library): details render from Library, Favorites and a smart-playlist detail with real extractor values (48 kHz / Mono / 64 kbps; test WAV 86.2 KB / 00:01); end-to-end delete of a disposable test WAV — system confirmation → file gone from disk → Room purged → library 1790→1789 live, search results drop the row, favorites/smart playlist untouched; 72 unit tests + lint (0 errors) green; logcat clean, no crashes.
+
 ## Pending Features
 
-- File management.
 - Optional future modules (Wi-Fi sync, online search) — designed as pluggable, not built.
 
 ## Known Issues
 
 - Genre metadata is frequently absent from MediaStore on real devices, so songs fall back to "Unknown" (handled gracefully). No crashes.
-- Bitrate is indexed from MediaStore; sample rate / channel count are not MediaStore columns and remain 0 (deferred to on-demand metadata enrichment).
+- Bitrate / sample rate / channel count are not reliably indexed by MediaStore; the File details screen enriches them on demand via `MediaExtractor` (falling back to the indexed values when the file cannot be read). No crashes.
 - Noted during Sprint 3 device testing: scripted `adb input tap` sequences occasionally deliver duplicate taps; single physical taps are handled correctly (no app-side defect).
 
 ## Next Sprint
 
-**Sprint 14: File management** (next remaining item from Pending Features).
+Next roadmap item from Pending Features (optional future modules — Wi-Fi sync, online search).

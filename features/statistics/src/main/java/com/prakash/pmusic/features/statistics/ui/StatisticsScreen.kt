@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.RowScope
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.prakash.pmusic.core.ui.component.SongRow
+import com.prakash.pmusic.domain.model.Song
 import com.prakash.pmusic.features.statistics.StatisticsState
 import com.prakash.pmusic.features.statistics.StatisticsViewModel
 
@@ -45,6 +46,7 @@ import com.prakash.pmusic.features.statistics.StatisticsViewModel
 @Composable
 fun StatisticsScreen(
     onBack: () -> Unit,
+    onOpenFileDetails: (Song) -> Unit,
     viewModel: StatisticsViewModel = hiltViewModel()
 ) {
     BackHandler(onBack = onBack)
@@ -162,7 +164,8 @@ fun StatisticsScreen(
                         isCurrent = song.id == playbackState.currentSong?.id,
                         isPlaying = playbackState.isPlaying,
                         onClick = { viewModel.playQueue(state.mostPlayed, state.mostPlayed.indexOf(song)) },
-                        onToggleFavorite = { viewModel.toggleFavorite(song) }
+                        onToggleFavorite = { viewModel.toggleFavorite(song) },
+                        onFileDetails = { onOpenFileDetails(song) }
                     )
                 }
             }
@@ -181,7 +184,8 @@ fun StatisticsScreen(
                         isCurrent = song.id == playbackState.currentSong?.id,
                         isPlaying = playbackState.isPlaying,
                         onClick = { viewModel.playQueue(state.recentlyPlayed, state.recentlyPlayed.indexOf(song)) },
-                        onToggleFavorite = { viewModel.toggleFavorite(song) }
+                        onToggleFavorite = { viewModel.toggleFavorite(song) },
+                        onFileDetails = { onOpenFileDetails(song) }
                     )
                 }
             }
