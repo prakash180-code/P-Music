@@ -2,6 +2,34 @@
 
 All notable changes to P-Music are documented here.
 
+## [0.13.0] - 2026-08-07
+
+### Sprint 13 — Smart playlists (`:features:playlist`)
+
+**Domain (`:domain`):**
+- `SmartPlaylistRule` sealed interface — `Favorites`, `MostPlayed`, `RecentlyAdded`, `RecentlyPlayed`, `NeverPlayed`, `Genre(name)` and `Artist(artistId, artistName)` — with a string codec: `encode()` yields `favorites`, `most_played`, `recently_added`, `recently_played`, `never_played`, `genre:<name>` and `artist:<id>:<name>`, and `parse(raw)` is its exact inverse (handles colons inside genre/artist names; malformed or unknown rules return null).
+- `Playlist` gained a nullable `rule` string plus an `isSmart` helper; `PlaylistRepository.createPlaylist` accepts the optional `rule`.
+- `SmartPlaylistRuleTest` — 12 tests covering encode/parse round-trips, colon-in-name handling and malformed-input rejection (the first `:domain` unit tests; `:domain` now has its own junit test implementation).
+
+**Core database (`:core:database`):**
+- `PlaylistEntity.rule` / `PlaylistProjection.rule` columns; `PlaylistDao` selects `p.rule AS rule` in every read and adds `observeRule(playlistId): Flow<String?>`; `SongDao` adds three smart queries — `observeNeverPlayed()` (playCount = 0), `observeByGenre(genre)` and `observeByArtist(artistId)` (all ordered by title).
+- `MIGRATION_2_3` (`ALTER TABLE playlists ADD COLUMN rule TEXT`), `PMusicDatabase` bumped to version 3, `DatabaseModule` registers the migration.
+
+**Data (`:data`):**
+- `PlaylistRepositoryImpl` now injects both DAOs: `observePlaylistSongs` keys off `observeRule(…).flatMapLatest` so a playlist detail live-switches between the join table (manual) and the derived smart query; `observePlaylists` derives each smart playlist's live count by folding the per-rule `Flow<Map<Long, Int>>` of counts (the `combine(Iterable)` overload failed type inference, so counts are folded over 2-arity `combine`); `smartSongs(rule)` dispatches to the matching query with a `SMART_PLAYLIST_LIMIT = 100` cap.
+- `PlaylistMappers.toDomain` gained an optional `smartCount`.
+
+**UI (`:features:playlist`):**
+- `PlaylistViewModel` adds `createSmartPlaylist(name, rule)` plus `genres` / `artists` flows for the value pickers.
+- `PlaylistsScreen`: a `SmallFloatingActionButton` (AutoAwesome icon, stacked above the regular FAB) opens a `SmartPlaylistDialog` — name field, radio rule rows (`SmartRuleRow`), a value dropdown (`RuleValueDropdown`) that appears for Genre/Artist rules, Create disabled until name + rule are valid.
+- `PlaylistItems`: smart playlists render an AutoAwesome icon with a `Label · N` subtitle (`playlistSubtitle`, where N is the live count); `PlaylistSongRow(readOnly = true)` hides the drag handle and overflow menu.
+- Playlist detail for a smart playlist is read-only: no Add-songs button, empty state text points at the rule, and `PlaylistSongList(readOnly)` skips the drag `pointerInput` — while the overflow menu shows only Rename/Delete (no Add songs).
+
+**App shell (`:app`):**
+- Version bumped to 0.13.0 (versionCode 13).
+
+**Verification (physical device, SDK 33, 1789-song library):** built + `lintDebug` + all unit tests green (`:domain` 12 new + `:data` 26). Fresh install migrated the DB to v3 with no Room errors. Created a **Favorites** smart playlist — list shows `Favorites · 2` (the device has exactly 2 favorites) and the detail renders the two songs read-only with a Play-all action; un-favoriting one song through the Favorites tab dropped the count to `Favorites · 1` live, and re-favoriting restored `Favorites · 2` (proves the count and list re-derive from the live query). Created a **Genre** smart playlist via the value dropdown (`Genre · Unknown · 1789`), confirming the picker path. The smart playlist overflow menu lists only Rename/Delete (no Add songs); a manual playlist still shows the normal `0 songs` subtitle and an editable detail with Add songs. Delete works for both types. The smart playlist (rule persisted in Room) survives a force-stop restart with the count intact. Logcat clean, no crashes.
+
 ## [0.12.0] - 2026-08-07
 
 ### Sprint 12 — Lyrics (`:features:lyrics`)

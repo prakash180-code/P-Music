@@ -19,11 +19,20 @@ interface PlaylistRepository {
     /** A single playlist by id, or null once it has been deleted. */
     fun observePlaylist(playlistId: Long): Flow<Playlist?>
 
-    /** Songs in [playlistId], in the stored (user-ordered) sequence. */
+    /**
+     * Songs in [playlistId]: the stored (user-ordered) sequence for manual
+     * playlists, or the live derived result of the playlist's smart rule.
+     */
     fun observePlaylistSongs(playlistId: Long): Flow<List<Song>>
 
-    /** Creates a playlist with the given (trimmed) name and returns its id. */
-    suspend fun createPlaylist(name: String): Long
+    /**
+     * Creates a playlist with the given (trimmed) name and returns its id.
+     *
+     * When [rule] is null the playlist is manual (empty until songs are added);
+     * otherwise it is a smart playlist whose contents are derived from the
+     * rule and update automatically.
+     */
+    suspend fun createPlaylist(name: String, rule: String? = null): Long
 
     suspend fun renamePlaylist(playlistId: Long, name: String)
 

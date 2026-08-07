@@ -2,8 +2,11 @@ package com.prakash.pmusic.features.playlist
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.prakash.pmusic.domain.model.Artist
+import com.prakash.pmusic.domain.model.Genre
 import com.prakash.pmusic.domain.model.PlaybackState
 import com.prakash.pmusic.domain.model.Playlist
+import com.prakash.pmusic.domain.model.SmartPlaylistRule
 import com.prakash.pmusic.domain.model.Song
 import com.prakash.pmusic.domain.repository.LibraryRepository
 import com.prakash.pmusic.domain.repository.PlaybackController
@@ -43,6 +46,14 @@ class PlaylistViewModel @Inject constructor(
 
     /** Every indexed song, used by the add-songs picker. */
     val allSongs: StateFlow<List<Song>> = libraryRepository.observeSongs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    /** Genres offered by the smart-playlist picker (genre rules). */
+    val genres: StateFlow<List<Genre>> = libraryRepository.observeGenres()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    /** Artists offered by the smart-playlist picker (artist rules). */
+    val artists: StateFlow<List<Artist>> = libraryRepository.observeArtists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
     /** Live playback snapshot for the now-playing highlight. */
@@ -101,6 +112,15 @@ class PlaylistViewModel @Inject constructor(
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
             playlistRepository.createPlaylist(trimmed)
+        }
+    }
+
+    /** Creates a smart playlist whose contents are derived from [rule]. */
+    fun createSmartPlaylist(name: String, rule: SmartPlaylistRule) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            playlistRepository.createPlaylist(trimmed, rule.encode)
         }
     }
 

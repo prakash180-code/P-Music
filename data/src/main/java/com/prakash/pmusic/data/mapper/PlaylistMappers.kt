@@ -9,10 +9,18 @@ import com.prakash.pmusic.domain.model.Playlist
  * unit-testable and importable by name.
  */
 
-fun PlaylistProjection.toDomain(): Playlist = Playlist(
+/**
+ * Projects a playlist row into the domain model.
+ *
+ * @param smartCount for a smart playlist, its live derived song count, which
+ *   overrides the join-table count (always zero for smart playlists, since
+ *   their contents are never stored).
+ */
+fun PlaylistProjection.toDomain(smartCount: Int? = null): Playlist = Playlist(
     id = id,
     name = name,
     createdAt = createdAt,
     updatedAt = updatedAt,
-    songCount = songCount
+    songCount = smartCount ?: songCount,
+    rule = rule
 )

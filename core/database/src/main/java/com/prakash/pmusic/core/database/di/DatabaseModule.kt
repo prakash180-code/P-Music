@@ -31,7 +31,7 @@ object DatabaseModule {
             context,
             PMusicDatabase::class.java,
             "pmusic.db"
-        ).addMigrations(Migrations.MIGRATION_1_2).build()
+        ).addMigrations(Migrations.MIGRATION_1_2, Migrations.MIGRATION_2_3).build()
 
     @Provides
     fun provideSongDao(database: PMusicDatabase): SongDao = database.songDao()

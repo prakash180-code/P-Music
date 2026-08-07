@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.GraphicEq
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.prakash.pmusic.core.ui.component.AppArtwork
 import com.prakash.pmusic.domain.model.Playlist
+import com.prakash.pmusic.domain.model.SmartPlaylistRule
 import com.prakash.pmusic.domain.model.Song
 
 /**
@@ -46,7 +48,12 @@ import com.prakash.pmusic.domain.model.Song
  * previewable and independent of the ViewModel.
  */
 
-/** Row for the playlists list: a music-queue tile, name, count and a menu. */
+/**
+ * Row for the playlists list: a music-queue tile, name, count and a menu.
+ *
+ * Smart playlists show their rule label instead of the song count and use an
+ * auto-update icon on the tile.
+ */
 @Composable
 fun PlaylistRow(
     playlist: Playlist,
@@ -72,7 +79,11 @@ fun PlaylistRow(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                imageVector = if (playlist.isSmart) {
+                    Icons.Filled.AutoAwesome
+                } else {
+                    Icons.AutoMirrored.Filled.QueueMusic
+                },
                 contentDescription = playlist.name,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(24.dp)
@@ -88,8 +99,10 @@ fun PlaylistRow(
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = if (playlist.songCount == 1) "1 song" else "${playlist.songCount} songs",
+                text = playlistSubtitle(playlist),
                 style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -128,6 +141,9 @@ fun PlaylistRow(
  *
  * The caller may attach the long-press drag modifier via [modifier]; the row
  * itself handles tap-to-play and the per-song overflow menu (move/remove).
+ *
+ * When [readOnly] is true (smart playlists, whose contents are derived), the
+ * drag handle and the overflow menu are hidden so the order cannot be edited.
  */
 @Composable
 fun PlaylistSongRow(
@@ -137,6 +153,7 @@ fun PlaylistSongRow(
     isCurrent: Boolean,
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
+    readOnly: Boolean = false,
     onClick: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
@@ -151,12 +168,14 @@ fun PlaylistSongRow(
             .padding(start = 8.dp, top = 6.dp, end = 4.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = Icons.Filled.DragIndicator,
-            contentDescription = "Reorder",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.width(8.dp))
+        if (!readOnly) {
+            Icon(
+                imageVector = Icons.Filled.DragIndicator,
+                contentDescription = "Reorder",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        }
         AppArtwork(
             artPath = song.artPath,
             contentDescription = song.title,
@@ -195,40 +214,42 @@ fun PlaylistSongRow(
                 modifier = Modifier.size(18.dp)
             )
         }
-        Box {
-            IconButton(onClick = { menuExpanded = true }) {
-                Icon(
-                    imageVector = Icons.Filled.MoreVert,
-                    contentDescription = "Options for ${song.title}"
-                )
-            }
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false }
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Move up") },
-                    enabled = index > 0,
-                    onClick = {
-                        menuExpanded = false
-                        onMoveUp()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Move down") },
-                    enabled = index < total - 1,
-                    onClick = {
-                        menuExpanded = false
-                        onMoveDown()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Remove") },
-                    onClick = {
-                        menuExpanded = false
-                        onRemove()
-                    }
-                )
+        if (!readOnly) {
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(
+                        imageVector = Icons.Filled.MoreVert,
+                        contentDescription = "Options for ${song.title}"
+                    )
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Move up") },
+                        enabled = index > 0,
+                        onClick = {
+                            menuExpanded = false
+                            onMoveUp()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Move down") },
+                        enabled = index < total - 1,
+                        onClick = {
+                            menuExpanded = false
+                            onMoveDown()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Remove") },
+                        onClick = {
+                            menuExpanded = false
+                            onRemove()
+                        }
+                    )
+                }
             }
         }
     }
@@ -296,3 +317,12 @@ fun AddSongRow(
 
 /** Rounded shape reused across the playlist tiles. */
 val PlaylistTileShape = RoundedCornerShape(12.dp)
+
+/** Subtitle under a playlist name: rule label for smart, song count otherwise. */
+internal fun playlistSubtitle(playlist: Playlist): String {
+    if (playlist.isSmart) {
+        val label = playlist.rule?.let { SmartPlaylistRule.parse(it) }?.label ?: "Smart playlist"
+        return "$label · ${playlist.songCount}"
+    }
+    return if (playlist.songCount == 1) "1 song" else "${playlist.songCount} songs"
+}

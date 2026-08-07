@@ -28,7 +28,7 @@ interface PlaylistDao {
     @Query(
         """
         SELECT p.id AS id, p.name AS name, p.createdAt AS createdAt,
-               p.updatedAt AS updatedAt, COUNT(ps.songId) AS songCount
+               p.updatedAt AS updatedAt, p.rule AS rule, COUNT(ps.songId) AS songCount
         FROM playlists p
         LEFT JOIN playlist_songs ps ON ps.playlistId = p.id
         GROUP BY p.id
@@ -41,7 +41,7 @@ interface PlaylistDao {
     @Query(
         """
         SELECT p.id AS id, p.name AS name, p.createdAt AS createdAt,
-               p.updatedAt AS updatedAt, COUNT(ps.songId) AS songCount
+               p.updatedAt AS updatedAt, p.rule AS rule, COUNT(ps.songId) AS songCount
         FROM playlists p
         LEFT JOIN playlist_songs ps ON ps.playlistId = p.id
         WHERE p.id = :playlistId
@@ -49,6 +49,10 @@ interface PlaylistDao {
         """
     )
     fun observePlaylist(playlistId: Long): Flow<PlaylistProjection?>
+
+    /** The encoded smart-playlist rule, or null for a manual playlist. */
+    @Query("SELECT rule FROM playlists WHERE id = :playlistId")
+    fun observeRule(playlistId: Long): Flow<String?>
 
     /** Songs of a playlist in stored position order. */
     @Query(

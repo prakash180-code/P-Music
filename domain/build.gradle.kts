@@ -32,4 +32,7 @@ kotlin {
 dependencies {
     // Flow/StateFlow are the contract types used by repository interfaces.
     implementation(libs.kotlinx.coroutines.core)
+
+    // Testing (the module is pure Kotlin, so tests are plain JVM tests).
+    testImplementation(libs.junit)
 }

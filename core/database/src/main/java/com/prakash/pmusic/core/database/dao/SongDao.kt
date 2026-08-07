@@ -44,6 +44,17 @@ interface SongDao {
     @Query("SELECT * FROM songs ORDER BY playCount DESC LIMIT :limit")
     fun observeMostPlayed(limit: Int): Flow<List<SongEntity>>
 
+    // --- Smart-playlist queries (derived contents, never stored) ---
+
+    @Query("SELECT * FROM songs WHERE playCount = 0 ORDER BY title COLLATE NOCASE")
+    fun observeNeverPlayed(): Flow<List<SongEntity>>
+
+    @Query("SELECT * FROM songs WHERE genre = :genre ORDER BY title COLLATE NOCASE")
+    fun observeByGenre(genre: String): Flow<List<SongEntity>>
+
+    @Query("SELECT * FROM songs WHERE artistId = :artistId ORDER BY title COLLATE NOCASE")
+    fun observeByArtist(artistId: Long): Flow<List<SongEntity>>
+
     // --- Derived groupings (single source of truth: the songs table) ---
 
     @Query(

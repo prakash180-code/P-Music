@@ -2,7 +2,7 @@
 
 ## Current Sprint
 
-**Sprint 12: Lyrics (`:features:lyrics`)** — completed.
+**Sprint 13: Smart playlists (`:features:playlist`)** — completed.
 
 ## Completed Features
 
@@ -79,17 +79,16 @@
   - **Audio-session fix**: forcing a hard-coded session id onto the ExoPlayer made Media3 derive a different AudioTrack session, so the effect's `Equalizer(0, staleId)` threw "Cannot create AudioTrack" and never registered. `PlaybackService` now generates a valid id (`AudioManager.generateAudioSessionId()`), assigns it to the player, and hands it to the engine before playback starts (player `onAudioSessionIdChanged` kept as a safety net).
   - Verified on device (1789-song library): the effect binds at service start, `dumpsys media.audio_flinger` shows the Equalizer registered on the playing session with 1 active track, the toggle flips `Enabled`, band gains/presets persist across restarts, no crashes.
 
-- **Sprint 12:**
-  - `:features:lyrics` module: `LyricsViewModel` (loads lyrics per current song, re-exposes `PlaybackState`) and `LyricsScreen` (full-screen overlay with header + back, loading/empty states, `SyncedLyrics` and `PlainLyrics` modes).
-  - `SyncedLyrics` highlights the line whose timestamp is the latest at-or-before the playhead in theme primary + bold and auto-scrolls it into view (`animateScrollToItem`); inactive lines render in `onSurfaceVariant`.
-  - `:domain`: `LyricLine` / `Lyrics` models and the `LyricsRepository.loadLyrics(song)` contract.
-  - `:data`: `LrcParser` (`[mm:ss.xx]` timestamps, multiple tags per line, `[offset:…]`, unsynced lines), `Id3LyricsParser` (ID3v2.2–2.4, extended headers, USLT plain + SYLT synced frames, all four encodings with UTF-16 BOM/endianness inference), `LyricsRepositoryImpl` (LRC sidecar → embedded ID3, IO dispatcher, bounded ID3 read); `LrcParserTest` + `Id3LyricsParserTest` added (26 unit tests total in `:data` green).
-  - **Now Playing** top bar gained a Lyrics `IconButton`; `AppRootScreen` hosts the overlay; version bumped to 0.12.0 (versionCode 12).
-  - Verified on device (1789-song library, synthetic ID3-UTF-16 + LRC tracks): embedded USLT lyrics render correctly (special chars included); the synced LRC highlight tracks the playhead in the primary colour while inactive lines stay grey (confirmed via screenshot pixel sampling across playback); new files needed a MediaStore `scan_file` before the app indexed them; test files and settings restored afterwards; logcat clean, no crashes.
+- **Sprint 13:**
+  - `SmartPlaylistRule` sealed interface (`Favorites`, `MostPlayed`, `RecentlyAdded`, `RecentlyPlayed`, `NeverPlayed`, `Genre(name)`, `Artist(id, name)`) with a string codec (`encode`/`parse`, inverse, colon-safe) in `:domain`; `Playlist.rule` + `isSmart`; `PlaylistRepository.createPlaylist(name, rule?)`.
+  - `:core:database` v3: `playlists.rule` column, `PlaylistDao.observeRule`, `SongDao` smart queries (`observeNeverPlayed` / `observeByGenre` / `observeByArtist`), `MIGRATION_2_3`.
+  - `PlaylistRepositoryImpl` re-derives smart playlist contents and counts live (rule-keyed `flatMapLatest` + folded combine of count flows, `SMART_PLAYLIST_LIMIT = 100`).
+  - `PlaylistsScreen` smart FAB + `SmartPlaylistDialog` (rule radios + Genre/Artist value dropdowns); smart rows show an AutoAwesome icon and `Label · N`; smart detail is read-only (no Add songs / drag / row options; overflow shows Rename/Delete only).
+  - `SmartPlaylistRuleTest` (12 tests, `:domain`); version bumped to 0.13.0 (versionCode 13).
+  - Verified on device (1789-song library, real v2→v3 migration): no Room errors on upgrade; `Favorites · 2` smart playlist live-updates 2→1→2 when favorites are toggled; Genre dropdown path works (`Genre · Unknown · 1789`); manual playlists keep their editable behavior; delete works for both types; rule persists across force-stop restart; logcat clean, no crashes.
 
 ## Pending Features
 
-- Smart playlists.
 - File management.
 - Optional future modules (Wi-Fi sync, online search) — designed as pluggable, not built.
 
@@ -101,4 +100,4 @@
 
 ## Next Sprint
 
-**Sprint 13: Smart playlists** (next remaining item from Pending Features).
+**Sprint 14: File management** (next remaining item from Pending Features).

@@ -14,23 +14,33 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -49,12 +59,16 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.prakash.pmusic.domain.model.Artist
+import com.prakash.pmusic.domain.model.Genre
 import com.prakash.pmusic.domain.model.Playlist
+import com.prakash.pmusic.domain.model.SmartPlaylistRule
 import com.prakash.pmusic.domain.model.Song
 import com.prakash.pmusic.features.playlist.PlaylistViewModel
 import kotlin.math.roundToInt
@@ -72,6 +86,8 @@ fun PlaylistsScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
     val selectedPlaylist by viewModel.selectedPlaylist.collectAsState()
     val songs by viewModel.playlistSongs.collectAsState()
     val allSongs by viewModel.allSongs.collectAsState()
+    val genres by viewModel.genres.collectAsState()
+    val artists by viewModel.artists.collectAsState()
     val playbackState by viewModel.playbackState.collectAsState()
     val isPickerOpen by viewModel.isPickerOpen.collectAsState()
 
@@ -79,7 +95,10 @@ fun PlaylistsScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
     if (selected == null) {
         PlaylistsListContent(
             playlists = playlists,
+            genres = genres,
+            artists = artists,
             onCreate = viewModel::createPlaylist,
+            onCreateSmart = viewModel::createSmartPlaylist,
             onOpen = viewModel::openPlaylist,
             onRename = viewModel::renamePlaylist,
             onDelete = viewModel::deletePlaylist
@@ -107,16 +126,20 @@ fun PlaylistsScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
     }
 }
 
-/** Playlist list: header, rows, a create FAB and the create/rename/delete dialogs. */
+/** Playlist list: header, rows, create FABs and the create/rename/delete dialogs. */
 @Composable
 private fun PlaylistsListContent(
     playlists: List<Playlist>,
+    genres: List<Genre>,
+    artists: List<Artist>,
     onCreate: (String) -> Unit,
+    onCreateSmart: (String, SmartPlaylistRule) -> Unit,
     onOpen: (Long) -> Unit,
     onRename: (Long, String) -> Unit,
     onDelete: (Long) -> Unit
 ) {
     var createOpen by remember { mutableStateOf(false) }
+    var smartOpen by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<Playlist?>(null) }
     var deleting by remember { mutableStateOf<Playlist?>(null) }
 
@@ -143,6 +166,17 @@ private fun PlaylistsListContent(
             }
         }
 
+        SmallFloatingActionButton(
+            onClick = { smartOpen = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 88.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.AutoAwesome,
+                contentDescription = "New smart playlist"
+            )
+        }
         FloatingActionButton(
             onClick = { createOpen = true },
             modifier = Modifier
@@ -165,6 +199,18 @@ private fun PlaylistsListContent(
                 createOpen = false
             },
             onDismiss = { createOpen = false }
+        )
+    }
+
+    if (smartOpen) {
+        SmartPlaylistDialog(
+            genres = genres,
+            artists = artists,
+            onConfirm = { name, rule ->
+                onCreateSmart(name, rule)
+                smartOpen = false
+            },
+            onDismiss = { smartOpen = false }
         )
     }
 
@@ -249,7 +295,7 @@ private fun PlaylistDetailContent(
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
-                    text = if (songs.size == 1) "1 song" else "${songs.size} songs",
+                    text = playlistSubtitle(playlist),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -260,11 +306,13 @@ private fun PlaylistDetailContent(
                     contentDescription = "Play all"
                 )
             }
-            IconButton(onClick = onAddSongs) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = "Add songs"
-                )
+            if (!playlist.isSmart) {
+                IconButton(onClick = onAddSongs) {
+                    Icon(
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = "Add songs"
+                    )
+                }
             }
         }
 
@@ -282,27 +330,37 @@ private fun PlaylistDetailContent(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                        imageVector = if (playlist.isSmart) {
+                            Icons.Filled.AutoAwesome
+                        } else {
+                            Icons.AutoMirrored.Filled.QueueMusic
+                        },
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(64.dp)
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "No songs yet",
+                        text = if (playlist.isSmart) "No songs match yet" else "No songs yet",
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Long-press a row to reorder. Tap Add songs to fill it up.",
+                        text = if (playlist.isSmart) {
+                            "This smart playlist fills itself as your library changes."
+                        } else {
+                            "Long-press a row to reorder. Tap Add songs to fill it up."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Button(onClick = onAddSongs) {
-                        Text("Add songs")
+                    if (!playlist.isSmart) {
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(onClick = onAddSongs) {
+                            Text("Add songs")
+                        }
                     }
                 }
             } else {
@@ -310,6 +368,7 @@ private fun PlaylistDetailContent(
                     songs = songs,
                     currentSongId = currentSongId,
                     isPlaying = isPlaying,
+                    readOnly = playlist.isSmart,
                     onPlayAt = onPlayAt,
                     onMoveUp = onMoveUp,
                     onMoveDown = onMoveDown,
@@ -320,7 +379,7 @@ private fun PlaylistDetailContent(
         }
     }
 
-    if (isPickerOpen) {
+    if (isPickerOpen && !playlist.isSmart) {
         SongPickerDialog(
             songs = allSongs,
             addedSongIds = songs.map { it.id }.toSet(),
@@ -336,6 +395,9 @@ private fun PlaylistDetailContent(
  * While dragging, the item is re-positioned live in a local list; the final
  * order is persisted once on drag end. Item placement animates automatically
  * via [Modifier.animateItem].
+ *
+ * When [readOnly] (smart playlists) the rows are plain tap-to-play rows with
+ * no reordering, since the order is derived from the rule.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -343,6 +405,7 @@ private fun PlaylistSongList(
     songs: List<Song>,
     currentSongId: Long?,
     isPlaying: Boolean,
+    readOnly: Boolean = false,
     onPlayAt: (Int) -> Unit,
     onMoveUp: (Int) -> Unit,
     onMoveDown: (Int) -> Unit,
@@ -379,39 +442,44 @@ private fun PlaylistSongList(
                 total = displaySongs.size,
                 isCurrent = song.id == currentSongId,
                 isPlaying = isPlaying,
-                modifier = Modifier
-                    .offset { IntOffset(0, if (isDragging) dragOffsetY.roundToInt() else 0) }
-                    .zIndex(if (isDragging) 1f else 0f)
-                    .pointerInput(song.id) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = {
-                                itemHeight = listState.layoutInfo.visibleItemsInfo
-                                    .firstOrNull { it.index == index }
-                                    ?.size?.toFloat() ?: 64f
-                                draggingIndex = index
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                val current = draggingIndex ?: return@detectDragGesturesAfterLongPress
-                                dragOffsetY += dragAmount.y
-                                val delta = (dragOffsetY / itemHeight).roundToInt()
-                                val maxTarget = (displaySongs.size - 1).coerceAtLeast(0)
-                                val target = (current + delta).coerceIn(0, maxTarget)
-                                if (target != current) moveTo(target)
-                            },
-                            onDragEnd = {
-                                onReorder(displaySongs.map { it.id })
-                                draggingIndex = null
-                                dragOffsetY = 0f
-                            },
-                            onDragCancel = {
-                                displaySongs = songs
-                                draggingIndex = null
-                                dragOffsetY = 0f
-                            }
-                        )
-                    }
-                    .animateItem(),
+                readOnly = readOnly,
+                modifier = if (readOnly) {
+                    Modifier
+                } else {
+                    Modifier
+                        .offset { IntOffset(0, if (isDragging) dragOffsetY.roundToInt() else 0) }
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .pointerInput(song.id) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    itemHeight = listState.layoutInfo.visibleItemsInfo
+                                        .firstOrNull { it.index == index }
+                                        ?.size?.toFloat() ?: 64f
+                                    draggingIndex = index
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    val current = draggingIndex ?: return@detectDragGesturesAfterLongPress
+                                    dragOffsetY += dragAmount.y
+                                    val delta = (dragOffsetY / itemHeight).roundToInt()
+                                    val maxTarget = (displaySongs.size - 1).coerceAtLeast(0)
+                                    val target = (current + delta).coerceIn(0, maxTarget)
+                                    if (target != current) moveTo(target)
+                                },
+                                onDragEnd = {
+                                    onReorder(displaySongs.map { it.id })
+                                    draggingIndex = null
+                                    dragOffsetY = 0f
+                                },
+                                onDragCancel = {
+                                    displaySongs = songs
+                                    draggingIndex = null
+                                    dragOffsetY = 0f
+                                }
+                            )
+                        }
+                        .animateItem()
+                },
                 onClick = { onPlayAt(index) },
                 onMoveUp = { onMoveUp(index) },
                 onMoveDown = { onMoveDown(index) },
@@ -477,6 +545,209 @@ private fun SongPickerDialog(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Which rule type the smart-playlist dialog is building. */
+private enum class SmartKind {
+    Favorites, MostPlayed, RecentlyAdded, RecentlyPlayed, NeverPlayed, Genre, Artist
+}
+
+/** Smart-playlist kinds that need no extra input, in display order. */
+private val SimpleSmartKinds = listOf(
+    SmartKind.Favorites,
+    SmartKind.MostPlayed,
+    SmartKind.RecentlyAdded,
+    SmartKind.RecentlyPlayed,
+    SmartKind.NeverPlayed
+)
+
+private fun SmartKind.label(): String = when (this) {
+    SmartKind.Favorites -> SmartPlaylistRule.Favorites.label
+    SmartKind.MostPlayed -> SmartPlaylistRule.MostPlayed.label
+    SmartKind.RecentlyAdded -> SmartPlaylistRule.RecentlyAdded.label
+    SmartKind.RecentlyPlayed -> SmartPlaylistRule.RecentlyPlayed.label
+    SmartKind.NeverPlayed -> SmartPlaylistRule.NeverPlayed.label
+    SmartKind.Genre -> "Genre"
+    SmartKind.Artist -> "Artist"
+}
+
+/** Create dialog for a smart playlist: name + rule (with genre/artist pickers). */
+@Composable
+private fun SmartPlaylistDialog(
+    genres: List<Genre>,
+    artists: List<Artist>,
+    onConfirm: (String, SmartPlaylistRule) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var kind by remember { mutableStateOf(SmartKind.Favorites) }
+    var selectedGenre by remember { mutableStateOf<Genre?>(null) }
+    var selectedArtist by remember { mutableStateOf<Artist?>(null) }
+    var genreMenuOpen by remember { mutableStateOf(false) }
+    var artistMenuOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(genres) {
+        if (selectedGenre == null && genres.isNotEmpty()) selectedGenre = genres.first()
+    }
+    LaunchedEffect(artists) {
+        if (selectedArtist == null && artists.isNotEmpty()) selectedArtist = artists.first()
+    }
+
+    val rule = when (kind) {
+        SmartKind.Favorites -> SmartPlaylistRule.Favorites
+        SmartKind.MostPlayed -> SmartPlaylistRule.MostPlayed
+        SmartKind.RecentlyAdded -> SmartPlaylistRule.RecentlyAdded
+        SmartKind.RecentlyPlayed -> SmartPlaylistRule.RecentlyPlayed
+        SmartKind.NeverPlayed -> SmartPlaylistRule.NeverPlayed
+        SmartKind.Genre -> selectedGenre?.let { SmartPlaylistRule.Genre(it.name) }
+        SmartKind.Artist -> selectedArtist?.let { SmartPlaylistRule.Artist(it.id, it.name) }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text(
+                    text = "New smart playlist",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Name") },
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Rule",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                SimpleSmartKinds.forEach { option ->
+                    SmartRuleRow(
+                        label = option.label(),
+                        selected = kind == option,
+                        onClick = { kind = option }
+                    )
+                }
+                if (genres.isNotEmpty()) {
+                    SmartRuleRow(
+                        label = "Genre · ${selectedGenre?.name ?: "…"}",
+                        selected = kind == SmartKind.Genre,
+                        onClick = { kind = SmartKind.Genre }
+                    )
+                    if (kind == SmartKind.Genre) {
+                        RuleValueDropdown(
+                            value = selectedGenre?.name ?: "Select genre",
+                            expanded = genreMenuOpen,
+                            onExpandedChange = { genreMenuOpen = it },
+                            options = genres.map { it.name },
+                            onSelect = { picked ->
+                                selectedGenre = genres.first { it.name == picked }
+                                genreMenuOpen = false
+                            }
+                        )
+                    }
+                }
+                if (artists.isNotEmpty()) {
+                    SmartRuleRow(
+                        label = "Artist · ${selectedArtist?.name ?: "…"}",
+                        selected = kind == SmartKind.Artist,
+                        onClick = { kind = SmartKind.Artist }
+                    )
+                    if (kind == SmartKind.Artist) {
+                        RuleValueDropdown(
+                            value = selectedArtist?.name ?: "Select artist",
+                            expanded = artistMenuOpen,
+                            onExpandedChange = { artistMenuOpen = it },
+                            options = artists.map { it.name },
+                            onSelect = { picked ->
+                                selectedArtist = artists.first { it.name == picked }
+                                artistMenuOpen = false
+                            }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        enabled = name.isNotBlank() && rule != null,
+                        onClick = { rule?.let { onConfirm(name, it) } }
+                    ) {
+                        Text("Create")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A radio-style rule row; [label] already carries the genre/artist value. */
+@Composable
+private fun SmartRuleRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+/** A labelled dropdown used to pick the genre / artist value of a rule. */
+@Composable
+private fun RuleValueDropdown(
+    value: String,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    options: List<String>,
+    onSelect: (String) -> Unit
+) {
+    Box(modifier = Modifier.fillMaxWidth().padding(start = 40.dp)) {
+        OutlinedButton(onClick = { onExpandedChange(true) }) {
+            Text(
+                text = value,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandedChange(false) }
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    onClick = { onSelect(option) }
+                )
             }
         }
     }

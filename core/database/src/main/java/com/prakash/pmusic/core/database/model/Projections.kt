@@ -35,13 +35,18 @@ data class GenreProjection(
 
 /**
  * Playlist row joined with its song count for the playlists list screen.
+ *
+ * [songCount] comes from the playlist_songs join table and is only meaningful
+ * for manual playlists (a smart playlist's live count is derived from its
+ * rule by the repository).
  */
 data class PlaylistProjection(
     val id: Long,
     val name: String,
     val createdAt: Long,
     val updatedAt: Long,
-    val songCount: Int
+    val songCount: Int,
+    val rule: String? = null
 )
 
 /**

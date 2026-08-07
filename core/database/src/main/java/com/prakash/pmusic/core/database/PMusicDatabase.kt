@@ -11,13 +11,14 @@ import com.prakash.pmusic.core.database.entity.SongEntity
 /**
  * The P-Music Room database.
  *
- * Version 1 ships the songs table. Version 2 adds user playlists. Every
- * version bump ships a [Migrations] object rather than falling back to
- * destructive recreation, so user data is never lost.
+ * Version 1 ships the songs table. Version 2 adds user playlists. Version 3
+ * adds the smart-playlist rule column. Every version bump ships a
+ * [Migrations] object rather than falling back to destructive recreation, so
+ * user data is never lost.
  */
 @Database(
     entities = [SongEntity::class, PlaylistEntity::class, PlaylistSongEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 abstract class PMusicDatabase : RoomDatabase() {
