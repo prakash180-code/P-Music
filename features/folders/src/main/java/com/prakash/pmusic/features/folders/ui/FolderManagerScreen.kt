@@ -172,8 +172,12 @@ fun FolderManagerScreen(
                 )
             }
 
-            if (state.folders.isEmpty() && !searchOpen) {
-                EmptyState(onAdd = { folderPicker.launch(null) })
+            if (state.folders.isEmpty()) {
+                if (searchOpen && state.searchQuery.isNotBlank()) {
+                    NoSearchMatches()
+                } else {
+                    EmptyState(onAdd = { folderPicker.launch(null) })
+                }
             } else {
                 FolderList(state = state, viewModel = viewModel)
             }
@@ -428,8 +432,8 @@ private fun EmptyState(onAdd: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Your whole device is scanned for music. Add folders to include only\n" +
-                "selected ones, or exclude folders that shouldn't appear.",
+            text = "Your whole device is scanned for music. Add a folder to exclude it,\n" +
+                "so its songs stay out of your library.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -439,6 +443,18 @@ private fun EmptyState(onAdd: () -> Unit) {
             Spacer(modifier = Modifier.width(4.dp))
             Text("Add folder")
         }
+    }
+}
+
+/** Centered hint shown when a search query matches no folders. */
+@Composable
+private fun NoSearchMatches() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(
+            text = "No folders match your search",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

@@ -1,7 +1,6 @@
 package com.prakash.pmusic.domain.repository
 
 import com.prakash.pmusic.domain.model.DetectedFolder
-import com.prakash.pmusic.domain.model.FolderRules
 import com.prakash.pmusic.domain.model.LibraryFolder
 import com.prakash.pmusic.domain.model.LibraryFolderType
 import kotlinx.coroutines.flow.Flow
@@ -41,23 +40,11 @@ interface LibraryFolderRepository {
     /** Moves a rule between the INCLUDED and EXCLUDED lists. */
     suspend fun setType(id: Long, type: LibraryFolderType)
 
-    /** Renames the display name shown in the folder manager. */
-    suspend fun renameFolder(id: Long, displayName: String)
-
     /** Removes the rule; songs under a removed INCLUDED folder are purged. */
     suspend fun removeFolder(id: Long)
 
-    /** Refreshes the persisted song count and last-scanned stamp. */
-    suspend fun refreshFolderStats(id: Long)
-
-    /** The enabled rules, as a snapshot for scanner decisions. */
-    suspend fun rulesSnapshot(): FolderRules
-
     /** True once any folder rule exists (used to skip the first-run wizard). */
     suspend fun hasFolders(): Boolean
-
-    /** Immediate recursive removal of every song under [folderPath]. */
-    suspend fun purgeFolder(folderPath: String): Int
 
     /**
      * Detects folders that mostly contain non-music audio (voice recordings,

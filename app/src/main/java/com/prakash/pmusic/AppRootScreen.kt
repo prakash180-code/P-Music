@@ -85,6 +85,8 @@ fun AppRootScreen() {
                     MiniPlayerBar(
                         song = playbackState.currentSong,
                         isPlaying = playbackState.isPlaying,
+                        positionMs = playbackState.positionMs,
+                        durationMs = playbackState.durationMs,
                         onTogglePlayPause = playerViewModel::togglePlayPause,
                         onClick = { showNowPlaying = true }
                     )

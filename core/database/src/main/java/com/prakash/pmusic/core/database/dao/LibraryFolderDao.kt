@@ -41,9 +41,6 @@ interface LibraryFolderDao {
     @Query("UPDATE library_folders SET type = :type WHERE id = :id")
     suspend fun setType(id: Long, type: String)
 
-    @Query("UPDATE library_folders SET displayName = :displayName WHERE id = :id")
-    suspend fun rename(id: Long, displayName: String)
-
     @Query("UPDATE library_folders SET songCount = :songCount, lastScanned = :lastScanned WHERE id = :id")
     suspend fun updateStats(id: Long, songCount: Int, lastScanned: Long)
 

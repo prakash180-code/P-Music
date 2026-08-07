@@ -14,7 +14,7 @@ All notable changes to P-Music are documented here.
 - `build.gradle.kts` (depends on `:core:ui` + `:domain` only) + `AndroidManifest.xml`, registered in `settings.gradle.kts`.
 
 **Domain (`:domain`):**
-- `LibraryFolder` (`id`, `folderPath`, `displayName`, `type`, `enabled`, `recursive`, `lastScanned`, `songCount`, `dateAdded`) + `LibraryFolderType` (INCLUDED/EXCLUDED); `LibraryFolderRepository` contract (`observeFolders`, `addFolder`, `setEnabled`, `setType`, `renameFolder`, `removeFolder`, `discoverNonMusicFolders`).
+- `LibraryFolder` (`id`, `folderPath`, `displayName`, `type`, `enabled`, `recursive`, `lastScanned`, `songCount`, `dateAdded`) + `LibraryFolderType` (INCLUDED/EXCLUDED); `LibraryFolderRepository` contract (`observeFolders`, `addFolder`, `setEnabled`, `setType`, `removeFolder`, `discoverNonMusicFolders`).
 - `FolderRules` + `FolderRulesMatcher` — pure path rules shared by the scanner/repository/UI: `normalize` (trim, flip separators, drop trailing slash), `isUnder` (recursive, case-insensitive containment), `isAllowed` (excluded always wins; empty included ⇒ whole device minus excluded; else only under included). 13 tests.
 
 **Core database (`:core:database`):**
@@ -33,6 +33,13 @@ All notable changes to P-Music are documented here.
 - The detector suggested excluding `/storage/7FDE-1813/Recordings (1)` purely because its name matched "recordings" — but on this device that folder recursively held **1,775 of the 1,789 songs** (a "Call till 21.11.24" subfolder is the real music library). Excluding it wiped the library to 14 songs. Fix: `NonMusicFolderClassifier` now treats a folder with ≥ 20 song-shaped files (1–10 min each) as a **music container** that must never be suggested; the detector counts song-shaped files across each folder's whole subtree before proposing anything. Also added `records` to the known non-music names (this device's meeting recordings live in `Music/Recorder/records`).
 
 **Verification (physical device, SDK 33, 1789-song library):** built + `lintDebug` (0 errors) + all unit tests green (**114**, incl. 42 new: `FolderRulesTest` 13, `NonMusicFolderClassifierTest` 18, `LibraryFolderMappersTest` 4, `TreePathResolverTest` 7). On device: first-run wizard suggests only genuine recording folders (12 internal + 4 SD card files); **Exclude recommended** purged exactly those 16 and the library went 1789 → **1773** with all music intact (SD library `…/Recordings (1)/Call till 21.11.24` fully preserved); the two EXCLUDED rules persist with correct resolved paths and `0 songs`; Add folder works end-to-end (SAF picker → system "Allow P-Music to access folder?" → EXCLUDED card appears); the card switch adds/removes the EXCLUDED rule and the Refresh / Open folder / Statistics actions work; rules + library survive a force-stop restart (1773 songs, no wizard re-show); playback still starts from the Library after the lint-driven `@OptIn(UnstableApi)` fixes on `PlaybackService`/`PMusicMediaButtonReceiver` (session `STATE_PLAYING`, position advancing, media button receiver restored); logcat clean, no crashes.
+
+**Sprint 15 follow-up (cleanup + polish):**
+- Removed dead repository API: `renameFolder`, `refreshFolderStats` and `rulesSnapshot` had no callers left after the screen reconciliation; `purgeFolder` dropped from the contract (now private to the impl); the now-unused `LibraryFolderDao.rename` was deleted too. Build + tests still green.
+- `MiniPlayerBar` gained a thin playback-progress bar along its top edge (primary colour over the track, driven by `PlaybackState.positionMs`/`durationMs`).
+- Folder Manager empty-state copy corrected to match the exclusion-only flow (no longer claims folders can "include only selected ones"), and a "No folders match your search" hint shows when a query has no hits.
+- Statistics empty-state icon sized consistently (`size(64.dp)` instead of height-only).
+- Verified on device (moto g32, 2-song library): folder-manager round-trip — toggle off → purge → **0 songs** in library, exclusion survives a force-stop, toggle on → rescan restores **2 songs**; mini player renders with the toggle and live progress while playing; `lintDebug` (0 errors) + all unit tests green.
 
 ## [0.14.0] - 2026-08-07
 

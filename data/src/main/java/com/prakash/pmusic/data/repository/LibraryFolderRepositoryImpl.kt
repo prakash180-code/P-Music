@@ -7,7 +7,6 @@ import com.prakash.pmusic.data.mapper.toEntity
 import com.prakash.pmusic.data.mapper.toFolderType
 import com.prakash.pmusic.data.scanner.NonMusicFolderDetector
 import com.prakash.pmusic.domain.model.DetectedFolder
-import com.prakash.pmusic.domain.model.FolderRules
 import com.prakash.pmusic.domain.model.FolderRulesMatcher
 import com.prakash.pmusic.domain.model.LibraryFolder
 import com.prakash.pmusic.domain.model.LibraryFolderType
@@ -78,11 +77,6 @@ class LibraryFolderRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun renameFolder(id: Long, displayName: String) {
-        if (displayName.isBlank()) return
-        folderDao.rename(id, displayName.trim())
-    }
-
     override suspend fun removeFolder(id: Long) {
         val folder = folderDao.getById(id) ?: return
         val wasIncluded = folder.type.toFolderType() == LibraryFolderType.INCLUDED
@@ -90,26 +84,9 @@ class LibraryFolderRepositoryImpl @Inject constructor(
         if (wasIncluded) purgeFolder(folder.folderPath)
     }
 
-    override suspend fun refreshFolderStats(id: Long) {
-        val folder = folderDao.getById(id) ?: return
-        val paths = songDao.getAllSongPaths()
-        val count = paths.count { FolderRulesMatcher.isUnder(it.path, folder.folderPath) }
-        folderDao.updateStats(id, count, System.currentTimeMillis())
-    }
-
-    override suspend fun rulesSnapshot(): FolderRules {
-        val enabled = folderDao.getAll().filter { it.enabled }
-        return FolderRules(
-            included = enabled.filter { it.type.toFolderType() == LibraryFolderType.INCLUDED }
-                .map { it.folderPath },
-            excluded = enabled.filter { it.type.toFolderType() == LibraryFolderType.EXCLUDED }
-                .map { it.folderPath }
-        )
-    }
-
     override suspend fun hasFolders(): Boolean = folderDao.count() > 0
 
-    override suspend fun purgeFolder(folderPath: String): Int {
+    private suspend fun purgeFolder(folderPath: String): Int {
         val normalized = FolderRulesMatcher.normalize(folderPath)
         if (normalized.isEmpty()) return 0
         val matches = songDao.getAllSongPaths()

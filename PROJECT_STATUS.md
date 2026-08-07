@@ -31,7 +31,7 @@
   - Fixed `observeAlbums` NULL `albumArtist` crash via `COALESCE(MAX(albumArtist), MAX(artist))`.
   - Verified on device: all tabs render, tap-to-play works (MediaSession STATE_PLAYING), search filters, favorites persist in Room and survive a rescan, no crashes.
 - **Sprint 5:**
-  - `:features:player` module: Hilt `PlayerViewModel` (live `PlaybackState` + transport action helpers), `TimeFormat`, `MiniPlayerBar` (artwork/title/artist/play-pause, tap-to-open), `NowPlayingScreen` (artwork, drag-commit seek bar with time labels, previous/play/next, shuffle/repeat/speed controls, scrollable queue with current-item highlight and row-tap jump).
+  - `:features:player` module: Hilt `PlayerViewModel` (live `PlaybackState` + transport action helpers), `TimeFormat`, `MiniPlayerBar` (artwork/title/artist/play-pause, thin playback-progress bar, tap-to-open), `NowPlayingScreen` (artwork, drag-commit seek bar with time labels, previous/play/next, shuffle/repeat/speed controls, scrollable queue with current-item highlight and row-tap jump).
   - Shared `AppArtwork` in `:core:ui`; `LibraryArtwork` refactored onto it.
   - `PlaybackController.jumpToQueueIndex` added (interface + Media3 impl via `seekTo(index)` + `play`).
   - Fixed `currentSong` never being set: the MediaItem tag is stripped across the media-session boundary, so the controller now resolves the song from its locally tracked queue by index.
