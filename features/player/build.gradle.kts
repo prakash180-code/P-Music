@@ -52,6 +52,7 @@ dependencies {
     implementation(libs.compose.material.icons.extended)
 
     // AndroidX
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
 
     // Dependency Injection

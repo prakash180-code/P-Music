@@ -1,5 +1,6 @@
 package com.prakash.pmusic.features.player.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -77,6 +78,8 @@ fun NowPlayingScreen(
     onJumpToIndex: (Int) -> Unit,
     onOpenLyrics: () -> Unit
 ) {
+    BackHandler(onBack = onDismiss)
+
     val song = playbackState.currentSong
 
     Column(
