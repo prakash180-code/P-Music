@@ -88,10 +88,11 @@ class UserPreferencesDataStore @Inject constructor(
     }
 
     private fun Preferences.toAppPreferences(): AppPreferences {
-        val themeName = this[Keys.THEME_MODE] ?: return AppPreferences()
+        val themeName = this[Keys.THEME_MODE]
         return AppPreferences(
-            themeMode = runCatching { ThemeMode.valueOf(themeName) }
-                .getOrDefault(ThemeMode.SYSTEM),
+            themeMode = themeName?.let {
+                runCatching { ThemeMode.valueOf(it) }.getOrDefault(ThemeMode.SYSTEM)
+            } ?: ThemeMode.SYSTEM,
             dynamicColor = this[Keys.DYNAMIC_COLOR] ?: true,
             rescanOnLaunch = this[Keys.RESCAN_ON_LAUNCH] ?: false,
             defaultPlaybackSpeed = this[Keys.DEFAULT_PLAYBACK_SPEED] ?: 1f,
