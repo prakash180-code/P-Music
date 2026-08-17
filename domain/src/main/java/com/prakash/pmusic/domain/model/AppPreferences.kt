@@ -36,5 +36,7 @@ data class AppPreferences(
     /** Last selected preset index, or -1 for a custom curve. */
     val equalizerPresetIndex: Int = -1,
     /** Whether the first-run folder-exclusion wizard has been shown/skipped. */
-    val folderWizardShown: Boolean = false
+    val folderWizardShown: Boolean = false,
+    /** MediaStore version observed after the last completed startup scan. */
+    val lastMediaStoreVersion: String? = null
 )

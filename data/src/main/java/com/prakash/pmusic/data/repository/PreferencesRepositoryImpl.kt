@@ -33,4 +33,7 @@ class PreferencesRepositoryImpl @Inject constructor(
     override suspend fun setEqualizerPresetIndex(index: Int) = dataStore.setEqualizerPresetIndex(index)
 
     override suspend fun setFolderWizardShown(shown: Boolean) = dataStore.setFolderWizardShown(shown)
+
+    override suspend fun setLastMediaStoreVersion(version: String) =
+        dataStore.setLastMediaStoreVersion(version)
 }

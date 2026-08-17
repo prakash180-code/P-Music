@@ -54,7 +54,8 @@ class NonMusicFolderDetector @Inject constructor(
             contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 arrayOf(MediaStore.Audio.Media.DATA, MediaStore.Audio.Media.DURATION),
-                MediaStore.Audio.Media.IS_MUSIC + " != 0",
+                "${MediaStore.Audio.Media.IS_MUSIC} != 0 OR " +
+                    "${MediaStore.Audio.Media.MIME_TYPE} LIKE 'audio/%'",
                 null,
                 null
             )?.use { cursor ->

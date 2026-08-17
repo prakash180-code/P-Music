@@ -32,4 +32,7 @@ interface PreferencesRepository {
 
     /** Marks the first-run folder-exclusion wizard as shown (or skipped). */
     suspend fun setFolderWizardShown(shown: Boolean)
+
+    /** Stores the MediaStore version seen after a completed library scan. */
+    suspend fun setLastMediaStoreVersion(version: String)
 }

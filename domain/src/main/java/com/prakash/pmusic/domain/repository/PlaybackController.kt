@@ -33,6 +33,9 @@ interface PlaybackController {
     /** Plays [queue] starting at [startIndex]. */
     fun playQueue(queue: List<Song>, startIndex: Int = 0)
 
+    /** Plays an audio URI received from another app, such as a file manager. */
+    fun playExternalAudio(uri: String)
+
     fun pause()
 
     fun togglePlayPause()

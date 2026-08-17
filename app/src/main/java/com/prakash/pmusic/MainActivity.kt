@@ -1,9 +1,12 @@
 package com.prakash.pmusic
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -41,6 +44,7 @@ import androidx.core.content.ContextCompat
 import com.prakash.pmusic.core.ui.theme.PmusicTheme
 import com.prakash.pmusic.data.watcher.MediaStoreWatcher
 import com.prakash.pmusic.domain.model.AppPreferences
+import com.prakash.pmusic.domain.model.LibraryScanState
 import com.prakash.pmusic.domain.repository.LibraryRepository
 import com.prakash.pmusic.domain.repository.PlaybackController
 import com.prakash.pmusic.domain.repository.PreferencesRepository
@@ -83,6 +87,7 @@ class MainActivity : ComponentActivity() {
 
         // Bind to the playback service so controls are immediately usable.
         playbackController.connect()
+        handleAudioIntent(intent)
 
         // Watch MediaStore so library changes on the device (new/deleted
         // songs) sync automatically without a manual refresh.
@@ -103,6 +108,33 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAudioIntent(intent)
+    }
+
+    private fun handleAudioIntent(intent: Intent?) {
+        if (intent == null) return
+        val uri = when (intent.action) {
+            Intent.ACTION_VIEW -> intent.data
+            Intent.ACTION_SEND -> streamUri(intent)
+            else -> null
+        } ?: return
+
+        val type = intent.type ?: contentResolver.getType(uri)
+        if (type != null && !type.startsWith("audio/")) return
+        playbackController.playExternalAudio(uri.toString())
+    }
+
+    @Suppress("DEPRECATION")
+    private fun streamUri(intent: Intent): Uri? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        }
 }
 
 /**
@@ -136,6 +168,14 @@ private fun MainContent(
         ActivityResultContracts.RequestPermission()
     ) { granted -> hasPermission = granted }
 
+    val mediaStoreVersion = remember(context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching { MediaStore.getVersion(context) }.getOrNull()
+        } else {
+            null
+        }
+    }
+
     if (hasPermission) {
         val prefs by preferencesRepository.preferences.collectAsState(initial = null)
         var scanStarted by remember { mutableStateOf(false) }
@@ -143,7 +183,16 @@ private fun MainContent(
             val loaded = prefs ?: return@LaunchedEffect
             if (!scanStarted) {
                 scanStarted = true
-                libraryRepository.scanLibrary(force = loaded.rescanOnLaunch)
+                val mediaStoreChanged = mediaStoreVersion != null &&
+                    mediaStoreVersion != loaded.lastMediaStoreVersion
+                libraryRepository.scanLibrary(
+                    force = loaded.rescanOnLaunch || mediaStoreChanged
+                )
+                if (mediaStoreVersion != null &&
+                    libraryRepository.scanState.value is LibraryScanState.Complete
+                ) {
+                    preferencesRepository.setLastMediaStoreVersion(mediaStoreVersion)
+                }
             }
         }
         AppRootScreen()

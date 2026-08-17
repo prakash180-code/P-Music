@@ -2,9 +2,12 @@ package com.prakash.pmusic.service
 
 import android.content.ComponentName
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -68,6 +71,8 @@ class Media3PlaybackController @Inject constructor(
     private var controller: MediaController? = null
 
     private var queue: List<Song> = emptyList()
+    private var pendingExternalUri: String? = null
+    private var externalPlayback = false
     private var positionTicker: Job? = null
 
     /** Speed applied whenever a new playback session starts. */
@@ -111,6 +116,10 @@ class Media3PlaybackController @Inject constructor(
                 connected.addListener(playerListener)
                 controller = connected
                 syncState(connected)
+                pendingExternalUri?.let { uri ->
+                    pendingExternalUri = null
+                    playExternalAudioNow(connected, uri)
+                }
             },
             ContextCompat.getMainExecutor(context)
         )
@@ -123,6 +132,8 @@ class Media3PlaybackController @Inject constructor(
         controller?.release()
         controller = null
         _playbackState.value = PlaybackState()
+        pendingExternalUri = null
+        externalPlayback = false
         lastRecordedSongId = null
     }
 
@@ -131,6 +142,7 @@ class Media3PlaybackController @Inject constructor(
         Log.d(TAG, "playSong(title=${song.title}, controller=${if (player == null) "null" else "ok"})")
         if (player == null) return
         queue = listOf(song)
+        externalPlayback = false
         player.setMediaItem(song.toMediaItem())
         player.prepare()
         player.setPlaybackSpeed(defaultPlaybackSpeed)
@@ -141,12 +153,102 @@ class Media3PlaybackController @Inject constructor(
         val player = controller ?: return
         if (queue.isEmpty()) return
         this.queue = queue
+        externalPlayback = false
         val items: List<MediaItem> = queue.map { it.toMediaItem() }
         val safeIndex = startIndex.coerceIn(0, items.size - 1)
         player.setMediaItems(items, safeIndex, 0L)
         player.prepare()
         player.setPlaybackSpeed(defaultPlaybackSpeed)
         player.play()
+    }
+
+    override fun playExternalAudio(uri: String) {
+        val player = controller
+        if (player == null) {
+            pendingExternalUri = uri
+            return
+        }
+        playExternalAudioNow(player, uri)
+    }
+
+    /** Plays a URI directly; it may not have a MediaStore/Room row yet. */
+    private fun playExternalAudioNow(player: MediaController, uriString: String) {
+        val uri = Uri.parse(uriString)
+        if (uri.scheme.isNullOrBlank()) return
+
+        val song = externalSong(uri)
+        queue = listOf(song)
+        externalPlayback = true
+        lastRecordedSongId = null
+        player.setMediaItem(
+            MediaItem.Builder()
+                .setMediaId(uriString)
+                .setUri(uri)
+                .setTag(song)
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(song.title)
+                        .setArtist(song.artist)
+                        .setAlbumTitle(song.album)
+                        .build()
+                )
+                .build()
+        )
+        player.prepare()
+        player.setPlaybackSpeed(defaultPlaybackSpeed)
+        player.play()
+    }
+
+    /** Builds enough metadata for the mini-player while MediaStore catches up. */
+    private fun externalSong(uri: Uri): Song {
+        val displayName = runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        }.getOrNull()
+        val fallbackName = uri.lastPathSegment
+            ?.let(Uri::decode)
+            ?.substringAfterLast(':')
+            ?.substringAfterLast('/')
+            ?.ifBlank { null }
+            ?: "Audio"
+        val fileName = displayName?.ifBlank { null } ?: fallbackName
+        val title = fileName.substringBeforeLast('.', fileName).ifBlank { "Audio" }
+
+        return Song(
+            id = uri.toString().hashCode().toLong(),
+            title = title,
+            artist = "Unknown",
+            artistId = 0L,
+            album = "Unknown",
+            albumId = 0L,
+            albumArtist = null,
+            trackNumber = 0,
+            discNumber = 0,
+            year = 0,
+            genre = "Unknown",
+            durationMs = 0L,
+            sizeBytes = 0L,
+            mimeType = context.contentResolver.getType(uri) ?: "audio/*",
+            path = uri.toString(),
+            dateAdded = 0L,
+            dateModified = 0L,
+            composer = null,
+            playCount = 0,
+            skipCount = 0,
+            lastPlayedAt = null,
+            isFavorite = false,
+            bitrate = 0,
+            sampleRate = 0,
+            channels = 0,
+            artPath = null
+        )
     }
 
     override fun pause() {
@@ -258,6 +360,7 @@ class Media3PlaybackController @Inject constructor(
      * id guards against the repeated events the listener receives.
      */
     private fun recordPlayIfNeeded(player: Player) {
+        if (externalPlayback) return
         if (player.playbackState != Player.STATE_READY || !player.isPlaying) return
         val index = player.currentMediaItemIndex
         if (index < 0) return

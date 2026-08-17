@@ -5,6 +5,7 @@ import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
@@ -17,6 +18,7 @@ import com.prakash.pmusic.domain.model.FolderRules
 import com.prakash.pmusic.domain.model.FolderRulesMatcher
 import com.prakash.pmusic.domain.model.LibraryFolderType
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -91,7 +93,7 @@ class MediaLibraryScanner @Inject constructor(
 
         // Metadata enrichment happens only for allowed songs.
         val genreBySong = queryGenres(allowedIds)
-        val albumArt = queryAlbumArtPaths()
+        val albumArt = queryAlbumArtPaths(allowedIds)
 
         // Pass 2: stream the full projection and build entities for allowed rows.
         val scannedIds = upsertAllowedRows(allowedIds, existingMeta, genreBySong, albumArt)
@@ -118,7 +120,7 @@ class MediaLibraryScanner @Inject constructor(
         contentResolver.query(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.DATA),
-            MediaStore.Audio.Media.IS_MUSIC + " != 0",
+            audioSelection(),
             null,
             null
         )?.use { cursor ->
@@ -169,7 +171,7 @@ class MediaLibraryScanner @Inject constructor(
         contentResolver.query(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             projection,
-            MediaStore.Audio.Media.IS_MUSIC + " != 0",
+            audioSelection(),
             null,
             null
         )?.use { cursor ->
@@ -267,7 +269,7 @@ class MediaLibraryScanner @Inject constructor(
     }
 
     /** albumId -> absolute path of the album artwork. */
-    private fun queryAlbumArtPaths(): Map<Long, String?> {
+    private fun queryAlbumArtPaths(allowedIds: Set<Long>): Map<Long, String?> {
         val result = HashMap<Long, String?>()
         val projection = arrayOf(
             MediaStore.Audio.Albums._ID,
@@ -286,7 +288,59 @@ class MediaLibraryScanner @Inject constructor(
                 result[cursor.getLong(idCol)] = cursor.getString(artCol)
             }
         }
+
+        // ALBUM_ART is null on many modern/OEM MediaStore implementations.
+        // Extract one embedded picture per allowed album into private cache.
+        val sampledAlbums = HashSet<Long>()
+        contentResolver.query(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.ALBUM_ID),
+            audioSelection(),
+            null,
+            null
+        )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+            val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+            while (cursor.moveToNext()) {
+                val mediaId = cursor.getLong(idCol)
+                val albumId = cursor.getLong(albumIdCol)
+                if (mediaId !in allowedIds || albumId <= 0L) continue
+                if (result[albumId].isUsableArtwork() || !sampledAlbums.add(albumId)) continue
+                extractEmbeddedArtwork(mediaId, albumId)?.let { result[albumId] = it }
+            }
+        }
         return result
+    }
+
+    private fun String?.isUsableArtwork(): Boolean = when {
+        this.isNullOrBlank() -> false
+        startsWith("content://") || startsWith("file://") -> true
+        else -> File(this).isFile
+    }
+
+    private fun extractEmbeddedArtwork(mediaId: Long, albumId: Long): String? {
+        val artworkDir = File(context.cacheDir, "album-art")
+        val target = File(artworkDir, "$albumId.jpg")
+        if (target.isFile && target.length() > 0L) return target.absolutePath
+
+        val retriever = MediaMetadataRetriever()
+        return try {
+            val mediaUri = ContentUris.withAppendedId(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                mediaId
+            )
+            val picture = contentResolver.openFileDescriptor(mediaUri, "r")?.use { descriptor ->
+                retriever.setDataSource(descriptor.fileDescriptor)
+                retriever.embeddedPicture
+            } ?: return null
+            artworkDir.mkdirs()
+            target.writeBytes(picture)
+            target.absolutePath
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
     }
 
     /**
@@ -340,5 +394,10 @@ class MediaLibraryScanner @Inject constructor(
         const val CHUNK_SIZE = 1_000
         const val DELETE_CHUNK_SIZE = 900
         const val UNKNOWN = "Unknown"
+
+        /** Include OEM rows that have not classified a valid audio MIME yet. */
+        fun audioSelection(): String =
+            "${MediaStore.Audio.Media.IS_MUSIC} != 0 OR " +
+                "${MediaStore.Audio.Media.MIME_TYPE} LIKE 'audio/%'"
     }
 }

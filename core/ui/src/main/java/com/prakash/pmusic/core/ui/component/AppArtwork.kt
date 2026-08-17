@@ -1,5 +1,6 @@
 package com.prakash.pmusic.core.ui.component
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -18,6 +19,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import java.io.File
 
 /**
  * Shared album-artwork loader for every feature module.
@@ -36,9 +38,14 @@ fun AppArtwork(
 ) {
     val shape = RoundedCornerShape(cornerRadius)
     if (!artPath.isNullOrBlank()) {
+        val artworkData: Any = when {
+            artPath.startsWith("content://") || artPath.startsWith("file://") ->
+                Uri.parse(artPath)
+            else -> File(artPath)
+        }
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
-                .data(artPath)
+                .data(artworkData)
                 .crossfade(true)
                 .build(),
             contentDescription = contentDescription,
