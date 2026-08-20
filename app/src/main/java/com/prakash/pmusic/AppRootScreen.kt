@@ -161,7 +161,8 @@ fun AppRootScreen(openNowPlayingSignal: Int = 0) {
                 onCycleSpeed = playerViewModel::cyclePlaybackSpeed,
                 onJumpToIndex = playerViewModel::jumpToQueueIndex,
                 onToggleFavorite = playerViewModel::toggleCurrentFavorite,
-                onOpenLyrics = { showLyrics = true }
+                onOpenLyrics = { showLyrics = true },
+                onSongDeleted = playerViewModel::onSongDeleted
             )
         }
 

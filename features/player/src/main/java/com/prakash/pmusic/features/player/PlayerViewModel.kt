@@ -94,6 +94,19 @@ class PlayerViewModel @Inject constructor(
     /** Jumps the queue to [index] and starts playing. */
     fun jumpToQueueIndex(index: Int) = playbackController.jumpToQueueIndex(index)
 
+    /**
+     * Called after the user confirmed the system delete request for the
+     * currently playing song: purges the Room row and removes the song from
+     * the player (playback continues with the next item).
+     */
+    fun onSongDeleted() {
+        val song = playbackState.value.currentSong ?: return
+        viewModelScope.launch {
+            libraryRepository.deleteSongsFromDatabase(listOf(song))
+            playbackController.removeCurrentSong()
+        }
+    }
+
     private companion object {
         /** Stop collecting flows shortly after the UI stops observing. */
         const val STOP_TIMEOUT_MS = 5_000L

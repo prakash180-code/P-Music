@@ -49,6 +49,12 @@ interface PlaybackController {
     /** Jumps directly to the queue item at [index], keeping the queue intact. */
     fun jumpToQueueIndex(index: Int)
 
+    /**
+     * Removes the currently playing song from the queue. Playback continues
+     * with the next item, or stops entirely when it was the last one.
+     */
+    fun removeCurrentSong()
+
     fun setShuffleEnabled(enabled: Boolean)
 
     fun setRepeatMode(mode: RepeatMode)

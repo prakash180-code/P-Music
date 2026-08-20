@@ -280,6 +280,25 @@ class Media3PlaybackController @Inject constructor(
         player.play()
     }
 
+    override fun removeCurrentSong() {
+        val player = controller ?: return
+        val index = player.currentMediaItemIndex
+        if (index < 0 || player.mediaItemCount == 0) return
+        if (player.mediaItemCount == 1) {
+            // Last item: stop and clear the queue instead of lingering on the
+            // now-deleted song.
+            player.stop()
+            player.clearMediaItems()
+            queue = emptyList()
+        } else {
+            // The player auto-advances to the item that takes the removed
+            // one's place, keeping playback going.
+            player.removeMediaItem(index)
+            queue = queue.filterIndexed { i, _ -> i != index }
+        }
+        syncState(player)
+    }
+
     override fun setShuffleEnabled(enabled: Boolean) {
         controller?.shuffleModeEnabled = enabled
     }

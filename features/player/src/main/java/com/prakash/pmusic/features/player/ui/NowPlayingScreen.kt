@@ -1,6 +1,13 @@
 package com.prakash.pmusic.features.player.ui
 
+import android.app.Activity
+import android.content.ContentUris
+import android.os.Build
+import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GraphicEq
@@ -32,6 +40,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,11 +90,39 @@ fun NowPlayingScreen(
     onCycleSpeed: () -> Unit,
     onJumpToIndex: (Int) -> Unit,
     onToggleFavorite: () -> Unit,
-    onOpenLyrics: () -> Unit
+    onOpenLyrics: () -> Unit,
+    onSongDeleted: () -> Unit
 ) {
     BackHandler(onBack = onDismiss)
 
     val song = playbackState.currentSong
+
+    val context = LocalContext.current
+
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    // Launches the system MediaStore delete request on API 30+, which shows
+    // its own confirmation; below that the file is deleted directly after an
+    // in-app confirm dialog.
+    val deleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            onSongDeleted()
+        }
+    }
+
+    fun requestDelete(song: Song) {
+        val resolver = context.contentResolver
+        val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, song.id)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val pendingIntent = MediaStore.createDeleteRequest(resolver, listOf(uri))
+            deleteLauncher.launch(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
+        } else {
+            val removed = resolver.delete(uri, null, null)
+            if (removed > 0) onSongDeleted()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -115,7 +153,17 @@ fun NowPlayingScreen(
                     SongInfo(
                         song = song,
                         isFavorite = isFavorite,
-                        onToggleFavorite = onToggleFavorite
+                        onToggleFavorite = onToggleFavorite,
+                        // External (content://) songs have no MediaStore row
+                        // of ours to delete, so the action stays hidden.
+                        showDelete = !song.path.startsWith("content://"),
+                        onDelete = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                requestDelete(song)
+                            } else {
+                                showDeleteConfirm = true
+                            }
+                        }
                     )
                 }
                 item(key = "seekbar") {
@@ -176,6 +224,34 @@ fun NowPlayingScreen(
             }
         }
     }
+
+    if (showDeleteConfirm && song != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete from device") },
+            text = {
+                Text(
+                    "Delete \"${song.title}\" permanently? The audio file will " +
+                        "be removed from your device and the song will leave your library."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        requestDelete(song)
+                    }
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 /** Fixed top bar with a dismiss affordance and a lyrics shortcut. */
@@ -233,12 +309,14 @@ private fun ArtworkBlock(song: Song) {
     }
 }
 
-/** Title, artist and album metadata with a favorite toggle. */
+/** Title, artist and album metadata with favorite/delete actions. */
 @Composable
 private fun SongInfo(
     song: Song,
     isFavorite: Boolean,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    showDelete: Boolean,
+    onDelete: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -288,6 +366,15 @@ private fun SongInfo(
                     MaterialTheme.colorScheme.onSurfaceVariant
                 }
             )
+        }
+        if (showDelete) {
+            IconButton(onClick = onDelete) {
+                Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = "Delete from device",
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
         }
     }
 }
