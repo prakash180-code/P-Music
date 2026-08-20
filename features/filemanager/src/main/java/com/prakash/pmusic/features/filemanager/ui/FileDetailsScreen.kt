@@ -225,7 +225,15 @@ fun FileDetailsScreen(
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
-                    onClick = { showConfirm = true },
+                    onClick = {
+                        // API 30+ shows the system delete confirmation itself,
+                        // so no extra in-app dialog keeps it a single prompt.
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            requestDelete(resolvedSong)
+                        } else {
+                            showConfirm = true
+                        }
+                    },
                     enabled = !deleting,
                     modifier = Modifier
                         .fillMaxWidth()

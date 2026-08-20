@@ -1,12 +1,22 @@
 package com.prakash.pmusic.features.player
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.prakash.pmusic.domain.model.PlaybackState
 import com.prakash.pmusic.domain.model.RepeatMode
+import com.prakash.pmusic.domain.repository.LibraryRepository
 import com.prakash.pmusic.domain.repository.PlaybackController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
  * ViewModel for the Now Playing screen and Mini Player.
@@ -16,13 +26,39 @@ import kotlinx.coroutines.flow.StateFlow
  * repeat, cycle speed) into controller calls, so the composables stay simple
  * and stateless.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
-    private val playbackController: PlaybackController
+    private val playbackController: PlaybackController,
+    private val libraryRepository: LibraryRepository
 ) : ViewModel() {
 
     /** Live playback snapshot (current song, position, mode flags, queue). */
     val playbackState: StateFlow<PlaybackState> = playbackController.playbackState
+
+    /**
+     * Whether the currently playing song is favorited, kept fresh from Room so
+     * toggling it anywhere (player, notification, library) updates everywhere.
+     */
+    val currentFavorite: StateFlow<Boolean> = playbackController.playbackState
+        .map { it.currentSong?.id }
+        .distinctUntilChanged()
+        .flatMapLatest { id ->
+            if (id == null) {
+                flowOf(false)
+            } else {
+                libraryRepository.observeSong(id).map { it?.isFavorite ?: false }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), false)
+
+    /** Toggles the favorite flag on the currently playing song. */
+    fun toggleCurrentFavorite() {
+        val song = playbackState.value.currentSong ?: return
+        viewModelScope.launch {
+            libraryRepository.setFavorite(song.id, !currentFavorite.value)
+        }
+    }
 
     fun togglePlayPause() = playbackController.togglePlayPause()
 
@@ -59,6 +95,9 @@ class PlayerViewModel @Inject constructor(
     fun jumpToQueueIndex(index: Int) = playbackController.jumpToQueueIndex(index)
 
     private companion object {
+        /** Stop collecting flows shortly after the UI stops observing. */
+        const val STOP_TIMEOUT_MS = 5_000L
+
         /** Supported speed presets, ascending. */
         val PLAYBACK_SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
 

@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.prakash.pmusic.core.ui.theme.PmusicTheme
 import com.prakash.pmusic.data.watcher.MediaStoreWatcher
+import com.prakash.pmusic.domain.model.ACTION_OPEN_NOW_PLAYING
 import com.prakash.pmusic.domain.model.AppPreferences
 import com.prakash.pmusic.domain.model.LibraryScanState
 import com.prakash.pmusic.domain.repository.LibraryRepository
@@ -50,6 +51,7 @@ import com.prakash.pmusic.domain.repository.PlaybackController
 import com.prakash.pmusic.domain.repository.PreferencesRepository
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
  * Single-activity host for the entire app.
@@ -81,9 +83,19 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var mediaStoreWatcher: MediaStoreWatcher
 
+    /**
+     * Incremented each time the playback notification asks the app to open
+     * the Now Playing screen; the root composable reacts to the latest value.
+     */
+    private val openPlayerSignal = MutableStateFlow(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        if (intent?.action == ACTION_OPEN_NOW_PLAYING) {
+            openPlayerSignal.value += 1
+        }
 
         // Bind to the playback service so controls are immediately usable.
         playbackController.connect()
@@ -96,6 +108,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val appPreferences by preferencesRepository.preferences
                 .collectAsState(initial = AppPreferences())
+            val openNowPlayingSignal by openPlayerSignal.collectAsState()
 
             PmusicTheme(
                 themeMode = appPreferences.themeMode,
@@ -103,7 +116,8 @@ class MainActivity : ComponentActivity() {
             ) {
                 MainContent(
                     libraryRepository = libraryRepository,
-                    preferencesRepository = preferencesRepository
+                    preferencesRepository = preferencesRepository,
+                    openNowPlayingSignal = openNowPlayingSignal
                 )
             }
         }
@@ -113,6 +127,9 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleAudioIntent(intent)
+        if (intent.action == ACTION_OPEN_NOW_PLAYING) {
+            openPlayerSignal.value += 1
+        }
     }
 
     private fun handleAudioIntent(intent: Intent?) {
@@ -146,7 +163,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MainContent(
     libraryRepository: LibraryRepository,
-    preferencesRepository: PreferencesRepository
+    preferencesRepository: PreferencesRepository,
+    openNowPlayingSignal: Int
 ) {
     val context = LocalContext.current
     val mediaPermission = remember {
@@ -195,7 +213,7 @@ private fun MainContent(
                 }
             }
         }
-        AppRootScreen()
+        AppRootScreen(openNowPlayingSignal = openNowPlayingSignal)
     } else {
         PermissionScreen(
             onRequest = { permissionLauncher.launch(mediaPermission) }

@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MusicNote
@@ -67,6 +69,7 @@ import com.prakash.pmusic.features.player.formatDuration
 @Composable
 fun NowPlayingScreen(
     playbackState: PlaybackState,
+    isFavorite: Boolean,
     onDismiss: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -76,6 +79,7 @@ fun NowPlayingScreen(
     onCycleRepeat: () -> Unit,
     onCycleSpeed: () -> Unit,
     onJumpToIndex: (Int) -> Unit,
+    onToggleFavorite: () -> Unit,
     onOpenLyrics: () -> Unit
 ) {
     BackHandler(onBack = onDismiss)
@@ -108,7 +112,11 @@ fun NowPlayingScreen(
                     ArtworkBlock(song = song)
                 }
                 item(key = "info") {
-                    SongInfo(song = song)
+                    SongInfo(
+                        song = song,
+                        isFavorite = isFavorite,
+                        onToggleFavorite = onToggleFavorite
+                    )
                 }
                 item(key = "seekbar") {
                     SeekBarSection(
@@ -225,34 +233,62 @@ private fun ArtworkBlock(song: Song) {
     }
 }
 
-/** Title, artist and album metadata. */
+/** Title, artist and album metadata with a favorite toggle. */
 @Composable
-private fun SongInfo(song: Song) {
-    Column(
+private fun SongInfo(
+    song: Song,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit
+) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(start = 40.dp, end = 24.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = song.title,
-            style = MaterialTheme.typography.headlineSmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = listOf(song.artist, song.album)
-                .filter { it.isNotBlank() }
-                .joinToString(" · "),
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Column(
+            modifier = Modifier.weight(1f),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = listOf(song.artist, song.album)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        IconButton(onClick = onToggleFavorite) {
+            Icon(
+                imageVector = if (isFavorite) {
+                    Icons.Filled.Favorite
+                } else {
+                    Icons.Filled.FavoriteBorder
+                },
+                contentDescription = if (isFavorite) {
+                    "Remove from favorites"
+                } else {
+                    "Add to favorites"
+                },
+                tint = if (isFavorite) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
+        }
     }
 }
 

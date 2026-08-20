@@ -16,6 +16,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,7 +67,7 @@ enum class AppDestination(val label: String, val icon: ImageVector) {
  *   instantly and survive navigation.
  */
 @Composable
-fun AppRootScreen() {
+fun AppRootScreen(openNowPlayingSignal: Int = 0) {
     var selected by rememberSaveable { mutableStateOf(AppDestination.LIBRARY) }
     var showNowPlaying by rememberSaveable { mutableStateOf(false) }
     var showLyrics by rememberSaveable { mutableStateOf(false) }
@@ -77,6 +78,12 @@ fun AppRootScreen() {
 
     val playerViewModel: PlayerViewModel = hiltViewModel()
     val playbackState by playerViewModel.playbackState.collectAsState()
+    val currentFavorite by playerViewModel.currentFavorite.collectAsState()
+
+    // Opens the player when the playback notification is tapped.
+    LaunchedEffect(openNowPlayingSignal) {
+        if (openNowPlayingSignal > 0) showNowPlaying = true
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -143,6 +150,7 @@ fun AppRootScreen() {
         if (showNowPlaying) {
             NowPlayingScreen(
                 playbackState = playbackState,
+                isFavorite = currentFavorite,
                 onDismiss = { showNowPlaying = false },
                 onTogglePlayPause = playerViewModel::togglePlayPause,
                 onNext = playerViewModel::next,
@@ -152,6 +160,7 @@ fun AppRootScreen() {
                 onCycleRepeat = playerViewModel::cycleRepeatMode,
                 onCycleSpeed = playerViewModel::cyclePlaybackSpeed,
                 onJumpToIndex = playerViewModel::jumpToQueueIndex,
+                onToggleFavorite = playerViewModel::toggleCurrentFavorite,
                 onOpenLyrics = { showLyrics = true }
             )
         }

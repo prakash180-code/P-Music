@@ -34,6 +34,11 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="audio/*" />
             </intent-filter>
+            <!-- Opens the Now Playing screen when the playback notification is tapped. -->
+            <intent-filter>
+                <action android:name="com.prakash.pmusic.action.OPEN_NOW_PLAYING" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
     </application>
 
