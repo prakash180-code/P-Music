@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.prakash.pmusic.domain.model.AppPreferences
@@ -47,6 +48,9 @@ class UserPreferencesDataStore @Inject constructor(
         val EQUALIZER_PRESET_INDEX = intPreferencesKey("equalizer_preset_index")
         val FOLDER_WIZARD_SHOWN = booleanPreferencesKey("folder_wizard_shown")
         val LAST_MEDIA_STORE_VERSION = stringPreferencesKey("last_media_store_version")
+        val AUTO_INCLUDE_NEW_OUTPUTS = booleanPreferencesKey("auto_include_new_outputs")
+        val REMEMBER_OUTPUT_SELECTION = booleanPreferencesKey("remember_output_selection")
+        val REMEMBERED_OUTPUT_IDS = stringSetPreferencesKey("remembered_output_ids")
     }
 
     /** Reactive snapshot of the current preferences. */
@@ -92,6 +96,24 @@ class UserPreferencesDataStore @Inject constructor(
         context.pmusicDataStore.edit { it[Keys.LAST_MEDIA_STORE_VERSION] = version }
     }
 
+    suspend fun setAutoIncludeNewOutputs(enabled: Boolean) {
+        context.pmusicDataStore.edit { it[Keys.AUTO_INCLUDE_NEW_OUTPUTS] = enabled }
+    }
+
+    suspend fun setRememberOutputSelection(enabled: Boolean) {
+        context.pmusicDataStore.edit { it[Keys.REMEMBER_OUTPUT_SELECTION] = enabled }
+    }
+
+    suspend fun setRememberedOutputIds(ids: Set<String>) {
+        context.pmusicDataStore.edit { prefs ->
+            if (ids.isEmpty()) {
+                prefs.remove(Keys.REMEMBERED_OUTPUT_IDS)
+            } else {
+                prefs[Keys.REMEMBERED_OUTPUT_IDS] = ids
+            }
+        }
+    }
+
     private fun Preferences.toAppPreferences(): AppPreferences {
         val themeName = this[Keys.THEME_MODE]
         return AppPreferences(
@@ -106,7 +128,10 @@ class UserPreferencesDataStore @Inject constructor(
                 ?.let(EqualizerGainsCodec::decode) ?: emptyList(),
             equalizerPresetIndex = this[Keys.EQUALIZER_PRESET_INDEX] ?: -1,
             folderWizardShown = this[Keys.FOLDER_WIZARD_SHOWN] ?: false,
-            lastMediaStoreVersion = this[Keys.LAST_MEDIA_STORE_VERSION]
+            lastMediaStoreVersion = this[Keys.LAST_MEDIA_STORE_VERSION],
+            autoIncludeNewOutputs = this[Keys.AUTO_INCLUDE_NEW_OUTPUTS] ?: false,
+            rememberOutputSelection = this[Keys.REMEMBER_OUTPUT_SELECTION] ?: true,
+            rememberedOutputIds = this[Keys.REMEMBERED_OUTPUT_IDS] ?: emptySet()
         )
     }
 }

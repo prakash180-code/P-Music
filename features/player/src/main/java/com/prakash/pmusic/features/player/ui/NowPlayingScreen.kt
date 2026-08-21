@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.SpeakerGroup
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -91,6 +92,7 @@ fun NowPlayingScreen(
     onJumpToIndex: (Int) -> Unit,
     onToggleFavorite: () -> Unit,
     onOpenLyrics: () -> Unit,
+    onOpenAudioOutputs: () -> Unit,
     onSongDeleted: () -> Unit
 ) {
     BackHandler(onBack = onDismiss)
@@ -187,7 +189,8 @@ fun NowPlayingScreen(
                         playbackSpeed = playbackState.playbackSpeed,
                         onToggleShuffle = onToggleShuffle,
                         onCycleRepeat = onCycleRepeat,
-                        onCycleSpeed = onCycleSpeed
+                        onCycleSpeed = onCycleSpeed,
+                        onOpenAudioOutputs = onOpenAudioOutputs
                     )
                 }
                 item(key = "queue-header") {
@@ -477,7 +480,7 @@ private fun TransportControls(
     }
 }
 
-/** Shuffle / repeat / playback-speed controls. */
+/** Shuffle / repeat / playback-speed / audio-output controls. */
 @Composable
 private fun ModeControls(
     shuffleEnabled: Boolean,
@@ -485,7 +488,8 @@ private fun ModeControls(
     playbackSpeed: Float,
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
-    onCycleSpeed: () -> Unit
+    onCycleSpeed: () -> Unit,
+    onOpenAudioOutputs: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -530,6 +534,14 @@ private fun ModeControls(
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 }
+            )
+        }
+        Spacer(modifier = Modifier.width(24.dp))
+        IconButton(onClick = onOpenAudioOutputs) {
+            Icon(
+                imageVector = Icons.Filled.SpeakerGroup,
+                contentDescription = "Audio outputs",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

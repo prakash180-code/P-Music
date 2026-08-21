@@ -1,6 +1,9 @@
 package com.prakash.pmusic.domain.repository
 
 import com.prakash.pmusic.domain.model.EqualizerState
+import com.prakash.pmusic.domain.model.MultiOutputCapabilities
+import com.prakash.pmusic.domain.model.MultiOutputDevice
+import com.prakash.pmusic.domain.model.MultiOutputState
 import com.prakash.pmusic.domain.model.PlaybackState
 import com.prakash.pmusic.domain.model.RepeatMode
 import com.prakash.pmusic.domain.model.Song
@@ -20,6 +23,18 @@ interface PlaybackController {
 
     /** Live equalizer state. Always emits a valid (default) snapshot. */
     val equalizerState: StateFlow<EqualizerState>
+
+    /** Audio output devices currently connected (outputs only). */
+    val multiOutputDevices: StateFlow<List<MultiOutputDevice>>
+
+    /**
+     * Probed simultaneous-output capabilities, or null before the first
+     * probe. Probing is explicit because it briefly opens silent AudioTracks.
+     */
+    val multiOutputCapabilities: StateFlow<MultiOutputCapabilities?>
+
+    /** Live state of the multi-output session (active outputs + volumes). */
+    val multiOutputState: StateFlow<MultiOutputState>
 
     /** Connects to the media session. Safe to call multiple times. */
     fun connect()
@@ -72,4 +87,23 @@ interface PlaybackController {
 
     /** Resets every band to neutral and clears the preset selection. */
     fun resetEqualizer()
+
+    /**
+     * Starts routing audio to every device in [deviceIds] simultaneously.
+     * The combination is probed first; on failure the state carries an
+     * explanatory message and playback keeps running unchanged.
+     */
+    fun startMultiOutput(deviceIds: Set<String>)
+
+    /** Stops multi-output routing; audio returns to the system default. */
+    fun stopMultiOutput()
+
+    /** Sets the per-output volume (0..100) of [deviceId] in an active session. */
+    fun setMultiOutputVolume(deviceId: String, volumePercent: Int)
+
+    /**
+     * Re-runs the capability probe for the currently connected outputs.
+     * Safe to call any time; runs off the main thread.
+     */
+    fun refreshMultiOutputCapabilities()
 }

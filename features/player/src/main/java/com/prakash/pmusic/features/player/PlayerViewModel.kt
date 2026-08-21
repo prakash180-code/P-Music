@@ -2,10 +2,14 @@ package com.prakash.pmusic.features.player
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.prakash.pmusic.domain.model.MultiOutputDevice
+import com.prakash.pmusic.domain.model.MultiOutputState
 import com.prakash.pmusic.domain.model.PlaybackState
 import com.prakash.pmusic.domain.model.RepeatMode
+import com.prakash.pmusic.domain.model.AppPreferences
 import com.prakash.pmusic.domain.repository.LibraryRepository
 import com.prakash.pmusic.domain.repository.PlaybackController
+import com.prakash.pmusic.domain.repository.PreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -30,11 +34,23 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     private val playbackController: PlaybackController,
-    private val libraryRepository: LibraryRepository
+    private val libraryRepository: LibraryRepository,
+    preferencesRepository: PreferencesRepository
 ) : ViewModel() {
 
     /** Live playback snapshot (current song, position, mode flags, queue). */
     val playbackState: StateFlow<PlaybackState> = playbackController.playbackState
+
+    /** Connected audio outputs for the quick multi-output panel. */
+    val multiOutputDevices: StateFlow<List<MultiOutputDevice>> =
+        playbackController.multiOutputDevices
+
+    /** Live multi-output session state for the quick panel. */
+    val multiOutputState: StateFlow<MultiOutputState> = playbackController.multiOutputState
+
+    /** Persisted preferences (remembered multi-output selection, ...). */
+    val preferences: StateFlow<AppPreferences> = preferencesRepository.preferences
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), AppPreferences())
 
     /**
      * Whether the currently playing song is favorited, kept fresh from Room so
@@ -93,6 +109,13 @@ class PlayerViewModel @Inject constructor(
 
     /** Jumps the queue to [index] and starts playing. */
     fun jumpToQueueIndex(index: Int) = playbackController.jumpToQueueIndex(index)
+
+    /** Starts multi-output routing to the selected outputs (quick panel). */
+    fun startMultiOutput(deviceIds: Set<String>) =
+        playbackController.startMultiOutput(deviceIds)
+
+    /** Stops multi-output routing (quick panel). */
+    fun stopMultiOutput() = playbackController.stopMultiOutput()
 
     /**
      * Called after the user confirmed the system delete request for the

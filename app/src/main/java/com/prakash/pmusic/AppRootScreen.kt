@@ -31,11 +31,13 @@ import com.prakash.pmusic.features.library.ui.LibraryScreen
 import com.prakash.pmusic.features.lyrics.ui.LyricsScreen
 import com.prakash.pmusic.features.filemanager.ui.FileDetailsScreen
 import com.prakash.pmusic.features.player.PlayerViewModel
+import com.prakash.pmusic.features.player.ui.AudioOutputPanel
 import com.prakash.pmusic.features.player.ui.MiniPlayerBar
 import com.prakash.pmusic.features.player.ui.NowPlayingScreen
 import com.prakash.pmusic.features.playlist.ui.PlaylistsScreen
 import com.prakash.pmusic.features.search.ui.FavoritesScreen
 import com.prakash.pmusic.features.search.ui.SearchScreen
+import com.prakash.pmusic.features.settings.ui.MultiOutputScreen
 import com.prakash.pmusic.features.settings.ui.SettingsScreen
 import com.prakash.pmusic.features.statistics.ui.StatisticsScreen
 import com.prakash.pmusic.features.equalizer.ui.EqualizerScreen
@@ -74,6 +76,8 @@ fun AppRootScreen(openNowPlayingSignal: Int = 0) {
     var showStatistics by rememberSaveable { mutableStateOf(false) }
     var showEqualizer by rememberSaveable { mutableStateOf(false) }
     var showFolderManager by rememberSaveable { mutableStateOf(false) }
+    var showMultiOutput by rememberSaveable { mutableStateOf(false) }
+    var showAudioOutputs by rememberSaveable { mutableStateOf(false) }
     var showFileDetails by rememberSaveable { mutableStateOf<Long?>(null) }
 
     val playerViewModel: PlayerViewModel = hiltViewModel()
@@ -133,6 +137,7 @@ fun AppRootScreen(openNowPlayingSignal: Int = 0) {
                     AppDestination.SETTINGS -> when {
                         showEqualizer -> EqualizerScreen(onBack = { showEqualizer = false })
                         showFolderManager -> FolderManagerScreen(onBack = { showFolderManager = false })
+                        showMultiOutput -> MultiOutputScreen(onBack = { showMultiOutput = false })
                         showStatistics -> StatisticsScreen(
                             onBack = { showStatistics = false },
                             onOpenFileDetails = { showFileDetails = it.id }
@@ -140,7 +145,8 @@ fun AppRootScreen(openNowPlayingSignal: Int = 0) {
                         else -> SettingsScreen(
                             onOpenStatistics = { showStatistics = true },
                             onOpenEqualizer = { showEqualizer = true },
-                            onOpenFolderManager = { showFolderManager = true }
+                            onOpenFolderManager = { showFolderManager = true },
+                            onOpenMultiOutput = { showMultiOutput = true }
                         )
                     }
                 }
@@ -162,7 +168,26 @@ fun AppRootScreen(openNowPlayingSignal: Int = 0) {
                 onJumpToIndex = playerViewModel::jumpToQueueIndex,
                 onToggleFavorite = playerViewModel::toggleCurrentFavorite,
                 onOpenLyrics = { showLyrics = true },
+                onOpenAudioOutputs = { showAudioOutputs = true },
                 onSongDeleted = playerViewModel::onSongDeleted
+            )
+        }
+
+        if (showAudioOutputs) {
+            val preferences by playerViewModel.preferences.collectAsState()
+            AudioOutputPanel(
+                devices = playerViewModel.multiOutputDevices.collectAsState().value,
+                multiOutputState = playerViewModel.multiOutputState.collectAsState().value,
+                rememberedIds = preferences.rememberedOutputIds,
+                onApply = { selection ->
+                    if (selection.isEmpty()) {
+                        playerViewModel.stopMultiOutput()
+                    } else {
+                        playerViewModel.startMultiOutput(selection)
+                    }
+                    showAudioOutputs = false
+                },
+                onDismiss = { showAudioOutputs = false }
             )
         }
 

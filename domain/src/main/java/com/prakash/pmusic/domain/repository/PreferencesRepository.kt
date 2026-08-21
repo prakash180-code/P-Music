@@ -35,4 +35,13 @@ interface PreferencesRepository {
 
     /** Stores the MediaStore version seen after a completed library scan. */
     suspend fun setLastMediaStoreVersion(version: String)
+
+    /** Toggles automatic inclusion of newly connected outputs. */
+    suspend fun setAutoIncludeNewOutputs(enabled: Boolean)
+
+    /** Toggles whether the last multi-output selection is remembered. */
+    suspend fun setRememberOutputSelection(enabled: Boolean)
+
+    /** Persists the device ids of the last started multi-output selection. */
+    suspend fun setRememberedOutputIds(ids: Set<String>)
 }

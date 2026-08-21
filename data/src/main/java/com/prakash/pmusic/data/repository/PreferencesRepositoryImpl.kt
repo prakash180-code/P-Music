@@ -36,4 +36,13 @@ class PreferencesRepositoryImpl @Inject constructor(
 
     override suspend fun setLastMediaStoreVersion(version: String) =
         dataStore.setLastMediaStoreVersion(version)
+
+    override suspend fun setAutoIncludeNewOutputs(enabled: Boolean) =
+        dataStore.setAutoIncludeNewOutputs(enabled)
+
+    override suspend fun setRememberOutputSelection(enabled: Boolean) =
+        dataStore.setRememberOutputSelection(enabled)
+
+    override suspend fun setRememberedOutputIds(ids: Set<String>) =
+        dataStore.setRememberedOutputIds(ids)
 }

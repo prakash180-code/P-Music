@@ -46,4 +46,7 @@ dependencies {
     // Hilt binds PlaybackController -> Media3PlaybackController
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+
+    // Unit tests (pure JVM logic: device catalog + capability derivation)
+    testImplementation(libs.junit)
 }

@@ -38,5 +38,14 @@ data class AppPreferences(
     /** Whether the first-run folder-exclusion wizard has been shown/skipped. */
     val folderWizardShown: Boolean = false,
     /** MediaStore version observed after the last completed startup scan. */
-    val lastMediaStoreVersion: String? = null
+    val lastMediaStoreVersion: String? = null,
+    /**
+     * Whether newly connected outputs are added to an active multi-output
+     * session automatically (after a successful compatibility probe).
+     */
+    val autoIncludeNewOutputs: Boolean = false,
+    /** Whether the last multi-output selection is preselected again next time. */
+    val rememberOutputSelection: Boolean = true,
+    /** Device ids of the last started multi-output selection. */
+    val rememberedOutputIds: Set<String> = emptySet()
 )

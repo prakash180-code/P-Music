@@ -16,12 +16,16 @@ import com.prakash.pmusic.core.media.toMediaItem
 import com.prakash.pmusic.core.media.toPlayerRepeatMode
 import com.prakash.pmusic.core.media.toSong
 import com.prakash.pmusic.domain.model.EqualizerState
+import com.prakash.pmusic.domain.model.MultiOutputCapabilities
+import com.prakash.pmusic.domain.model.MultiOutputDevice
+import com.prakash.pmusic.domain.model.MultiOutputState
 import com.prakash.pmusic.domain.model.PlaybackState
 import com.prakash.pmusic.domain.model.RepeatMode
 import com.prakash.pmusic.domain.model.Song
 import com.prakash.pmusic.domain.repository.LibraryRepository
 import com.prakash.pmusic.domain.repository.PlaybackController
 import com.prakash.pmusic.domain.repository.PreferencesRepository
+import com.prakash.pmusic.service.audio.MultiOutputEngine
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -57,7 +61,8 @@ class Media3PlaybackController @Inject constructor(
     @ApplicationContext private val context: Context,
     private val preferencesRepository: PreferencesRepository,
     private val libraryRepository: LibraryRepository,
-    private val equalizerEngine: AudioFxEqualizerEngine
+    private val equalizerEngine: AudioFxEqualizerEngine,
+    private val multiOutputEngine: MultiOutputEngine
 ) : PlaybackController {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -66,6 +71,14 @@ class Media3PlaybackController @Inject constructor(
     override val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
 
     override val equalizerState: StateFlow<EqualizerState> = equalizerEngine.state
+
+    override val multiOutputDevices: StateFlow<List<MultiOutputDevice>> =
+        multiOutputEngine.devices
+
+    override val multiOutputCapabilities: StateFlow<MultiOutputCapabilities?> =
+        multiOutputEngine.capabilities
+
+    override val multiOutputState: StateFlow<MultiOutputState> = multiOutputEngine.state
 
     @Volatile
     private var controller: MediaController? = null
@@ -320,6 +333,15 @@ class Media3PlaybackController @Inject constructor(
         equalizerEngine.selectPreset(presetIndex)
 
     override fun resetEqualizer() = equalizerEngine.reset()
+
+    override fun startMultiOutput(deviceIds: Set<String>) = multiOutputEngine.start(deviceIds)
+
+    override fun stopMultiOutput() = multiOutputEngine.stop()
+
+    override fun setMultiOutputVolume(deviceId: String, volumePercent: Int) =
+        multiOutputEngine.setVolume(deviceId, volumePercent)
+
+    override fun refreshMultiOutputCapabilities() = multiOutputEngine.refreshCapabilities()
 
     private fun syncState(player: Player) {
         val currentIndex = player.currentMediaItemIndex

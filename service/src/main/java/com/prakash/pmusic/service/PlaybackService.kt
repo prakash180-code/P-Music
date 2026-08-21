@@ -10,7 +10,9 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
@@ -21,6 +23,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.prakash.pmusic.domain.model.ACTION_OPEN_NOW_PLAYING
 import com.prakash.pmusic.domain.repository.LibraryRepository
+import com.prakash.pmusic.service.audio.MultiOutputEngine
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -72,6 +75,9 @@ class PlaybackService : MediaSessionService() {
 
     @Inject
     lateinit var equalizerEngine: AudioFxEqualizerEngine
+
+    @Inject
+    lateinit var multiOutputEngine: MultiOutputEngine
 
     @Inject
     lateinit var libraryRepository: LibraryRepository
@@ -135,7 +141,21 @@ class PlaybackService : MediaSessionService() {
         equalizerEngine.setAudioSessionId(audioSessionId)
         Log.i(TAG, "assigning player audio session $audioSessionId")
 
-        val player = ExoPlayer.Builder(this).build().apply {
+        // The renderers factory installs the multi-output fan-out sink. With
+        // no selection it wraps a single default child, so playback behaves
+        // exactly like the stock sink.
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean
+            ): AudioSink = multiOutputEngine.createSink(
+                enableFloatOutput,
+                enableAudioTrackPlaybackParams
+            )
+        }
+
+        val player = ExoPlayer.Builder(this, renderersFactory).build().apply {
             setAudioSessionId(audioSessionId)
             // Default audio attributes with focus handling let Media3
             // request/relinquish audio focus on our behalf.

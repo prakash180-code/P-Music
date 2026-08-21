@@ -51,12 +51,14 @@ import com.prakash.pmusic.features.settings.SettingsViewModel
  * @param onOpenStatistics opens the Statistics screen (hosted by the shell).
  * @param onOpenEqualizer opens the Equalizer screen (hosted by the shell).
  * @param onOpenFolderManager opens the Library Folder Manager (hosted by the shell).
+ * @param onOpenMultiOutput opens the Multi-Output Audio screen (hosted by the shell).
  */
 @Composable
 fun SettingsScreen(
     onOpenStatistics: () -> Unit = {},
     onOpenEqualizer: () -> Unit = {},
     onOpenFolderManager: () -> Unit = {},
+    onOpenMultiOutput: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val preferences by viewModel.preferences.collectAsState()
@@ -107,6 +109,11 @@ fun SettingsScreen(
                     label = "Equalizer",
                     value = "View",
                     onClick = onOpenEqualizer
+                )
+                ValueRow(
+                    label = "Multi-Output Audio",
+                    value = "View",
+                    onClick = onOpenMultiOutput
                 )
                 HorizontalDivider(
                     modifier = Modifier.padding(horizontal = 16.dp),
