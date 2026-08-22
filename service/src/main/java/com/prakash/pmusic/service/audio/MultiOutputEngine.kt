@@ -1,22 +1,26 @@
 package com.prakash.pmusic.service.audio
 
+import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.prakash.pmusic.domain.model.ActiveOutput
-import com.prakash.pmusic.domain.model.MultiOutputCapabilities
+import com.prakash.pmusic.domain.model.MultiOutputCapability
 import com.prakash.pmusic.domain.model.MultiOutputDevice
 import com.prakash.pmusic.domain.model.MultiOutputState
+import com.prakash.pmusic.domain.model.OemCapabilityInfo
 import com.prakash.pmusic.domain.repository.PreferencesRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,10 +53,13 @@ class MultiOutputEngine @Inject constructor(
     private val prober = MultiOutputCapabilityProber(audioManager)
 
     private val _devices = MutableStateFlow<List<MultiOutputDevice>>(emptyList())
+
+    /** Physical outputs by stable id; the engine's routing truth. */
+    private val physicalOutputs = HashMap<String, PhysicalAudioOutput>()
     val devices: StateFlow<List<MultiOutputDevice>> = _devices.asStateFlow()
 
-    private val _capabilities = MutableStateFlow<MultiOutputCapabilities?>(null)
-    val capabilities: StateFlow<MultiOutputCapabilities?> = _capabilities.asStateFlow()
+    private val _capabilities = MutableStateFlow<MultiOutputCapability?>(null)
+    val capabilities: StateFlow<MultiOutputCapability?> = _capabilities.asStateFlow()
 
     private val _state = MutableStateFlow(MultiOutputState())
     val state: StateFlow<MultiOutputState> = _state.asStateFlow()
@@ -69,7 +76,7 @@ class MultiOutputEngine @Inject constructor(
     private var autoIncludeNewOutputs = false
     private var rememberOutputSelection = true
     private var lastCapabilityProbeKey: String? = null
-
+    private var probeJob: Job? = null
     init {
         refreshDevices()
         audioManager.registerAudioDeviceCallback(
@@ -140,7 +147,7 @@ class MultiOutputEngine @Inject constructor(
             return
         }
         scope.launch(Dispatchers.IO) {
-            val routable = prober.probeCombination(resolved)
+            val routable = prober.probeCombination(resolved).passed
             withContext(scope.coroutineContext) {
                 if (!routable) {
                     _state.value = _state.value.copy(
@@ -183,39 +190,120 @@ class MultiOutputEngine @Inject constructor(
     }
 
     /**
-     * Re-runs the capability probe for the currently connected outputs.
+     * Re-runs the full capability probe for the currently connected outputs.
+     *
+     * Every relevant combination from the required matrix is tested with real
+     * silent tracks; partial results are published after each test so the
+     * diagnostic report fills in live, and the final snapshot carries the
+     * three-level verdict plus public device identity and OEM detection.
      * Results are cached until the set of connected outputs changes.
      */
     fun refreshCapabilities() {
-        val snapshot = _devices.value
+        // Probe and report only physical outputs that can actually carry
+        // app media audio (the hidden earpiece is never a media candidate).
+        val snapshot = _devices.value.filter { it.isSelectable }
         val probeDevices = snapshot.map { ProbeDevice(it.id, it.type) }
         val key = probeDevices.map { it.id }.sorted().joinToString("|")
         if (key == lastCapabilityProbeKey && _capabilities.value != null) return
+        if (probeJob?.isActive == true) return
 
-        scope.launch(Dispatchers.IO) {
+        val names = snapshot.associate { it.id to it.name }
+        val oemInfo = detectOemCapability(probeDevices)
+        probeJob = scope.launch(Dispatchers.IO) {
             val results = LinkedHashMap<String, Boolean>()
+            val details = HashMap<String, String>()
+
+            fun publishPartial() {
+                val derived = MultiOutputCapabilityLogic.derive(
+                    devices = probeDevices,
+                    results = results,
+                    details = details,
+                    names = names,
+                    manufacturer = Build.MANUFACTURER,
+                    brand = Build.BRAND,
+                    model = Build.MODEL,
+                    androidVersion = Build.VERSION.SDK_INT,
+                    oem = oemInfo
+                )
+                _capabilities.value = derived
+            }
+
             MultiOutputCapabilityLogic.candidateCombinations(probeDevices).forEach { combo ->
                 val infos = combo.mapNotNull { resolveDevice(it.id) }
                 if (infos.size == combo.size) {
-                    results[MultiOutputCapabilityLogic.combinationKey(combo.map { it.id })] =
-                        prober.probeCombination(infos)
+                    val comboKey = MultiOutputCapabilityLogic.combinationKey(combo.map { it.id })
+                    val outcome = prober.probeCombination(infos)
+                    results[comboKey] = outcome.passed
+                    if (!outcome.passed && outcome.detail.isNotEmpty()) {
+                        details[comboKey] = outcome.detail
+                    }
+                    publishPartial()
                 }
             }
-            // One triple attempt to see whether more than two outputs work.
-            MultiOutputCapabilityLogic.candidateTriple(probeDevices, results)?.let { triple ->
-                val infos = triple.mapNotNull { resolveDevice(it.id) }
-                if (infos.size == triple.size) {
-                    results[MultiOutputCapabilityLogic.combinationKey(triple.map { it.id })] =
-                        prober.probeCombination(infos)
-                }
-            }
-            val derived = MultiOutputCapabilityLogic.derive(probeDevices, results)
+
+            val derived = MultiOutputCapabilityLogic.derive(
+                devices = probeDevices,
+                results = results,
+                details = details,
+                names = names,
+                manufacturer = Build.MANUFACTURER,
+                brand = Build.BRAND,
+                model = Build.MODEL,
+                androidVersion = Build.VERSION.SDK_INT,
+                oem = oemInfo
+            )
             withContext(scope.coroutineContext) {
                 lastCapabilityProbeKey = key
                 _capabilities.value = derived
             }
             Log.i(TAG, "capabilities probed: $derived")
         }
+    }
+
+    /**
+     * Detects OEM/system multi-output features through public APIs only.
+     * Detection never claims support: unless the feature is controllable by a
+     * normal app (currently none are, across known OEMs), the result honestly
+     * says so and Level 3 stands.
+     */
+    private fun detectOemCapability(devices: List<ProbeDevice>): OemCapabilityInfo? {
+        // LE Audio Broadcast (AuraCast): public support flags exist on API 33+,
+        // but starting/controlling broadcasts is restricted to system apps —
+        // no public API lets a third-party player open its own broadcast.
+        if (Build.VERSION.SDK_INT >= 33) {
+            runCatching {
+                val adapter =
+                    (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager)
+                        .adapter
+                if (adapter != null &&
+                    adapter.isLeAudioBroadcastSourceSupported() ==
+                    android.bluetooth.BluetoothStatusCodes.FEATURE_SUPPORTED
+                ) {
+                    return OemCapabilityInfo(
+                        detectedFeature = "LE Audio Broadcast (AuraCast)",
+                        availableToThirdParty = false,
+                        message = "OEM/system feature detected but not available to " +
+                            "third-party applications."
+                    )
+                }
+            }
+        }
+        // Samsung Dual Audio exists in system settings only; there is no
+        // public API for an app to enable or route through it. Report it when
+        // plausible (Samsung build + at least two Bluetooth outputs present)
+        // without ever claiming control over it.
+        val btOutputs = devices.count {
+            AudioDeviceCatalog.categoryFor(it.type) ==
+                com.prakash.pmusic.domain.model.OutputCategory.BLUETOOTH
+        }
+        if (Build.MANUFACTURER.equals("samsung", ignoreCase = true) && btOutputs >= 2) {
+            return OemCapabilityInfo(
+                detectedFeature = "Samsung Dual Audio",
+                availableToThirdParty = false,
+                message = "OEM feature detected but not available to third-party applications."
+            )
+        }
+        return null
     }
 
     // ------------------------------------------------------------------
@@ -258,7 +346,7 @@ class MultiOutputEngine @Inject constructor(
         val resolved = proposed.mapNotNull { resolveDevice(it) }
         if (resolved.size != proposed.size) return
         scope.launch(Dispatchers.IO) {
-            val routable = prober.probeCombination(resolved)
+            val routable = prober.probeCombination(resolved).passed
             withContext(scope.coroutineContext) {
                 if (!routable || selectedIds.isEmpty()) return@withContext
                 selectedIds.add(candidateId)
@@ -276,19 +364,44 @@ class MultiOutputEngine @Inject constructor(
 
     private fun refreshDevices() {
         val infos = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-        _devices.value = infos
             .filter { it.type != AudioDeviceInfo.TYPE_TELEPHONY }
-            .map { info ->
+
+        // Debugging aid: raw Android endpoint records before deduplication.
+        Log.i(
+            TAG,
+            "RAW AUDIO DEVICES:\n" + infos.joinToString("\n") {
+                "  - id=${it.id} type=${it.type} name=${it.productName} " +
+                    "addr=${it.address.ifBlank { "-" }}"
+            }
+        )
+
+        val physical = AudioDeviceDeduplicator.deduplicate(infos)
+        synchronized(physicalOutputs) {
+            physicalOutputs.clear()
+            physical.forEach { physicalOutputs[it.stableId] = it }
+        }
+
+        _devices.value = physical
+            .map {
                 MultiOutputDevice(
-                    id = deviceId(info),
-                    name = info.productName?.toString()
-                        ?.takeIf { it.isNotBlank() }
-                        ?: AudioDeviceCatalog.labelFor(info.type),
-                    category = AudioDeviceCatalog.categoryFor(info.type),
-                    type = info.type
+                    id = it.stableId,
+                    name = it.displayName,
+                    category = it.category,
+                    type = it.representative.type,
+                    isSelectable = it.isSelectable
                 )
             }
             .sortedWith(compareBy({ it.category }, { it.name }))
+
+        // Debugging aid: one line per PHYSICAL output after deduplication.
+        Log.i(
+            TAG,
+            "DEDUPLICATED:\n" + physical.joinToString("\n") {
+                "  - ${it.stableId} -> ${it.displayName}" +
+                    (if (!it.isSelectable) " (hidden)" else "") +
+                    " [endpoints=${it.endpoints.joinToString(",") { e -> e.id.toString() }}]"
+            }
+        )
     }
 
     // ------------------------------------------------------------------
@@ -297,9 +410,24 @@ class MultiOutputEngine @Inject constructor(
 
     private fun deviceId(info: AudioDeviceInfo): String = "${info.type}:${info.address}"
 
-    private fun resolveDevice(id: String): AudioDeviceInfo? =
-        audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            .firstOrNull { deviceId(it) == id }
+    /**
+     * Resolves a stable physical id to the representative endpoint for
+     * playback pinning. Accepts pre-deduplication ids (`"<type>:<address>"`)
+     * so remembered selections keep working after the upgrade.
+     */
+    private fun resolveDevice(id: String): AudioDeviceInfo? {
+        synchronized(physicalOutputs) {
+            physicalOutputs[id]?.let { return it.representative }
+        }
+        if (!id.contains(':')) return null
+        val legacyType = id.substringBefore(':').toIntOrNull() ?: return null
+        val legacyAddr = id.substringAfter(':')
+        return synchronized(physicalOutputs) {
+            physicalOutputs.values.firstOrNull { physical ->
+                physical.endpoints.any { it.type == legacyType && it.address == legacyAddr }
+            }?.representative
+        }
+    }
 
     /** Targets for the sink: the selection, or one default target. */
     private fun currentTargets(): List<OutputTarget> {

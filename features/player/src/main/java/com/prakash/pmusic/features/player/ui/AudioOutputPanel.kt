@@ -46,20 +46,21 @@ fun AudioOutputPanel(
             }
         )
     }
+    val selectableDevices = devices.filter { it.isSelectable }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Audio outputs") },
         text = {
             Column {
-                if (devices.isEmpty()) {
+                if (selectableDevices.isEmpty()) {
                     Text(
                         text = "No audio outputs found.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                devices.forEach { device ->
+                selectableDevices.forEach { device ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

@@ -3,7 +3,7 @@ package com.prakash.pmusic.features.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.prakash.pmusic.domain.model.AppPreferences
-import com.prakash.pmusic.domain.model.MultiOutputCapabilities
+import com.prakash.pmusic.domain.model.MultiOutputCapability
 import com.prakash.pmusic.domain.model.MultiOutputDevice
 import com.prakash.pmusic.domain.model.MultiOutputState
 import com.prakash.pmusic.domain.repository.PlaybackController
@@ -31,7 +31,7 @@ class MultiOutputViewModel @Inject constructor(
 
     val devices: StateFlow<List<MultiOutputDevice>> = playbackController.multiOutputDevices
 
-    val capabilities: StateFlow<MultiOutputCapabilities?> =
+    val capabilities: StateFlow<MultiOutputCapability?> =
         playbackController.multiOutputCapabilities
 
     val multiOutputState: StateFlow<MultiOutputState> = playbackController.multiOutputState

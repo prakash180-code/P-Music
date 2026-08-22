@@ -106,17 +106,18 @@ fun MultiOutputScreen(
                 .verticalScroll(rememberScrollState())
         ) {
             CapabilityCard(
-                message = capabilities?.message,
+                capabilities = capabilities,
                 onCheck = viewModel::refreshCapabilities
             )
 
+            val supported = capabilities?.supported == true
             if (multiState.active) {
                 ActiveSection(
                     outputs = multiState.outputs,
                     onVolumeChange = viewModel::setVolume,
                     onStop = viewModel::stop
                 )
-            } else {
+            } else if (supported) {
                 SelectionSection(
                     devices = devices,
                     selection = selection,
@@ -137,6 +138,10 @@ fun MultiOutputScreen(
                 ) {
                     Text(text = "Start (${selection.size} selected)")
                 }
+            } else if (capabilities != null) {
+                // Honest unsupported verdict: normal single-output playback
+                // continues; only informational device list is shown.
+                DetectedDevicesSection(devices)
             }
 
             multiState.message?.let { message ->
@@ -162,34 +167,228 @@ fun MultiOutputScreen(
                 onCheckedChange = viewModel::setAutoIncludeNewOutputs
             )
 
+            CapabilityReport(capabilities)
+
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
 
-/** Support summary with a manual re-check action. */
+/** Level-aware support summary with a manual re-check action. */
 @Composable
-private fun CapabilityCard(message: String?, onCheck: () -> Unit) {
+private fun CapabilityCard(
+    capabilities: com.prakash.pmusic.domain.model.MultiOutputCapability?,
+    onCheck: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        Text(
-            text = "What this device supports",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = message ?: "Not checked yet.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        when {
+            capabilities == null -> {
+                Text(
+                    text = "What this device supports",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Not checked yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            capabilities.level == com.prakash.pmusic.domain.model.MultiOutputLevel.NATIVE_ANDROID -> {
+                Text(
+                    text = "✓ Native Android Multi-Output",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Verified simultaneous outputs: ${capabilities.verifiedOutputCount}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            capabilities.level == com.prakash.pmusic.domain.model.MultiOutputLevel.OEM_SUPPORTED -> {
+                Text(
+                    text = "✓ OEM Multi-Output Support",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = capabilities.oem?.message ?: capabilities.reason,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            else -> {
+                Text(
+                    text = "✕ Multi-Output Not Supported",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = capabilities.reason,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
         TextButton(onClick = onCheck) {
             Text("Check again")
         }
+    }
+}
+
+/** Level 3: informational list of detected outputs (no selection possible). */
+@Composable
+private fun DetectedDevicesSection(devices: List<MultiOutputDevice>) {
+    SectionHeader("Detected outputs")
+    devices.filter { it.isSelectable }.forEach { device ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = "✓", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = device.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+    if (devices.isEmpty()) {
+        Text(
+            text = "No audio outputs found.",
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = "✕", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "Simultaneous playback: not supported",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/** Diagnostic report: device identity, every probe test and the verdict. */
+@Composable
+private fun CapabilityReport(
+    capabilities: com.prakash.pmusic.domain.model.MultiOutputCapability?
+) {
+    if (capabilities == null) return
+    SectionHeader("Capability report")
+    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        ReportRow("Device", listOf(capabilities.manufacturer, capabilities.model)
+            .filter { it.isNotBlank() }.joinToString(" ").ifBlank { "Unknown" })
+        ReportRow("Android", capabilities.androidVersion.toString())
+        ReportRow("Level", capabilities.level.name)
+        ReportRow(
+            "Verified simultaneous outputs",
+            capabilities.verifiedOutputCount.toString()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Tests",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        if (capabilities.tests.isEmpty()) {
+            Text(
+                text = "No combinations were testable.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        capabilities.tests.forEach { test ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp)
+            ) {
+                Text(
+                    text = if (test.passed) "✓" else "✕",
+                    color = if (test.passed) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        text = test.label,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (test.detail.isNotBlank()) {
+                        Text(
+                            text = test.detail,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        capabilities.oem?.let { oem ->
+            Text(
+                text = oem.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+        Text(
+            text = "Reason: ${capabilities.reason}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun ReportRow(label: String, value: String) {
+    Row(modifier = Modifier.padding(vertical = 1.dp)) {
+        Text(
+            text = "$label: ",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }
 
@@ -201,6 +400,12 @@ private fun ActiveSection(
     onStop: () -> Unit
 ) {
     SectionHeader("Playing on ${outputs.size} output(s)")
+    Text(
+        text = "Bluetooth devices may have different audio latency.",
+        modifier = Modifier.padding(horizontal = 16.dp),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
     outputs.forEach { output ->
         Column(
             modifier = Modifier
@@ -246,7 +451,7 @@ private fun SelectionSection(
 ) {
     SectionHeader("Choose outputs")
     OutputCategory.entries.forEach { category ->
-        val group = devices.filter { it.category == category }
+        val group = devices.filter { it.category == category && it.isSelectable }
         if (group.isEmpty()) return@forEach
         Text(
             text = category.label(),
