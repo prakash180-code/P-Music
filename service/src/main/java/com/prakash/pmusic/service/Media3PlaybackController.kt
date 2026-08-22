@@ -16,7 +16,7 @@ import com.prakash.pmusic.core.media.toMediaItem
 import com.prakash.pmusic.core.media.toPlayerRepeatMode
 import com.prakash.pmusic.core.media.toSong
 import com.prakash.pmusic.domain.model.EqualizerState
-import com.prakash.pmusic.domain.model.MultiOutputCapabilities
+import com.prakash.pmusic.domain.model.MultiOutputCapability
 import com.prakash.pmusic.domain.model.MultiOutputDevice
 import com.prakash.pmusic.domain.model.MultiOutputState
 import com.prakash.pmusic.domain.model.PlaybackState
@@ -75,7 +75,7 @@ class Media3PlaybackController @Inject constructor(
     override val multiOutputDevices: StateFlow<List<MultiOutputDevice>> =
         multiOutputEngine.devices
 
-    override val multiOutputCapabilities: StateFlow<MultiOutputCapabilities?> =
+    override val multiOutputCapabilities: StateFlow<MultiOutputCapability?> =
         multiOutputEngine.capabilities
 
     override val multiOutputState: StateFlow<MultiOutputState> = multiOutputEngine.state

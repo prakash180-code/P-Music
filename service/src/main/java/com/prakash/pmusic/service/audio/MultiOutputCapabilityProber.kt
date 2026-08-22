@@ -15,9 +15,13 @@ import android.util.Log
  *
  * This is the only honest way to know: `setPreferredDevice` alone does not
  * guarantee routing, and support varies per OEM/driver regardless of API
- * level. A probe takes roughly 300 ms and briefly opens inaudible tracks.
+ * level. A probe takes up to ~2 s per combination and briefly opens
+ * inaudible tracks.
  */
 class MultiOutputCapabilityProber(private val audioManager: AudioManager) {
+
+    /** Result of one combination probe, with an explanation on failure. */
+    data class Outcome(val passed: Boolean, val detail: String = "")
 
     companion object {
         private const val TAG = "PMultiOutputProbe"
@@ -39,27 +43,31 @@ class MultiOutputCapabilityProber(private val audioManager: AudioManager) {
     /**
      * Attempts to route one silent track to every device simultaneously.
      *
-     * @return true only when every track reported it was actually routed to
-     *   its requested device.
+     * @return [Outcome] with `passed` true only when every track reported it
+     *   was actually routed to its requested device; `detail` explains the
+     *   first failure when known.
      */
-    fun probeCombination(devices: List<AudioDeviceInfo>): Boolean {
-        if (devices.isEmpty()) return false
-        if (devices.size == 1) return true // single output always "routes"
+    fun probeCombination(devices: List<AudioDeviceInfo>): Outcome {
+        if (devices.isEmpty()) return Outcome(false, "no devices")
+        if (devices.size == 1) return Outcome(true) // single output always "routes"
 
         val bufferSizeBytes =
             (SAMPLE_RATE * BUFFER_MS / 1000L).toInt() * BYTES_PER_FRAME
         val tracks = mutableListOf<AudioTrack>()
+        var failureDetail = ""
         try {
             devices.forEach { device ->
                 val track = buildSilentTrack(bufferSizeBytes)
                 tracks.add(track)
                 if (track.state != AudioTrack.STATE_INITIALIZED) {
                     Log.w(TAG, "probe track failed to init for type=${device.type}")
-                    return false
+                    failureDetail = "audio track failed to initialise for type=${device.type}"
+                    return Outcome(false, failureDetail)
                 }
                 if (!track.setPreferredDevice(device)) {
                     Log.w(TAG, "setPreferredDevice rejected for type=${device.type}")
-                    return false
+                    failureDetail = "routing request rejected for type=${device.type}"
+                    return Outcome(false, failureDetail)
                 }
                 track.write(ByteArray(bufferSizeBytes), 0, bufferSizeBytes)
                 track.play()
@@ -93,12 +101,18 @@ class MultiOutputCapabilityProber(private val audioManager: AudioManager) {
                     "probe type=${requested.type} addr=${requested.address} -> " +
                         "routed=${routed?.type}/${routed?.address} ok=$ok"
                 )
-                if (!ok) allRouted = false
+                if (!ok) {
+                    allRouted = false
+                    if (failureDetail.isEmpty()) {
+                        failureDetail = "type=${requested.type} was routed to " +
+                            "type=${routed?.type ?: -1} instead"
+                    }
+                }
             }
-            return allRouted
+            return Outcome(allRouted, if (allRouted) "" else failureDetail)
         } catch (t: Throwable) {
             Log.w(TAG, "probe failed", t)
-            return false
+            return Outcome(false, "probe error: ${t.javaClass.simpleName}")
         } finally {
             tracks.forEach { track ->
                 // Only initialised tracks may be paused/flushed; calling

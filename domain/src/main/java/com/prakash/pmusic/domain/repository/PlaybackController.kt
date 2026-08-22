@@ -1,7 +1,7 @@
 package com.prakash.pmusic.domain.repository
 
 import com.prakash.pmusic.domain.model.EqualizerState
-import com.prakash.pmusic.domain.model.MultiOutputCapabilities
+import com.prakash.pmusic.domain.model.MultiOutputCapability
 import com.prakash.pmusic.domain.model.MultiOutputDevice
 import com.prakash.pmusic.domain.model.MultiOutputState
 import com.prakash.pmusic.domain.model.PlaybackState
@@ -31,7 +31,7 @@ interface PlaybackController {
      * Probed simultaneous-output capabilities, or null before the first
      * probe. Probing is explicit because it briefly opens silent AudioTracks.
      */
-    val multiOutputCapabilities: StateFlow<MultiOutputCapabilities?>
+    val multiOutputCapabilities: StateFlow<MultiOutputCapability?>
 
     /** Live state of the multi-output session (active outputs + volumes). */
     val multiOutputState: StateFlow<MultiOutputState>

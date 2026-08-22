@@ -1,126 +1,181 @@
 package com.prakash.pmusic.service.audio
 
-import com.prakash.pmusic.domain.model.MultiOutputCapabilities
+import com.prakash.pmusic.domain.model.CapabilityTestResult
+import com.prakash.pmusic.domain.model.MultiOutputCapability
+import com.prakash.pmusic.domain.model.MultiOutputLevel
+import com.prakash.pmusic.domain.model.OemCapabilityInfo
+import com.prakash.pmusic.domain.model.OutputCategory
 
 /** Framework-free stand-in for a connected output device. */
 data class ProbeDevice(val id: String, val type: Int)
 
 /**
- * Pure derivation of [MultiOutputCapabilities] from probe results.
+ * Pure derivation of [MultiOutputCapability] from probe results.
  *
  * The prober runs real silent AudioTracks per candidate combination and
  * records whether every track actually routed to its requested device; this
- * object only turns those honest results into the capability model shown in
- * the UI. No API level is ever consulted — behaviour differs per OEM.
+ * object only turns those honest results into the three-level capability
+ * model shown in the UI. No API level or manufacturer name is ever used to
+ * claim support — only verified probe results are.
  */
 object MultiOutputCapabilityLogic {
 
     /** Canonical, order-independent key for a combination of device ids. */
     fun combinationKey(ids: Collection<String>): String = ids.sorted().joinToString("+")
 
+    /** Short role label for one device, numbered inside its category. */
+    fun labelFor(device: ProbeDevice, indexInCategory: Int): String {
+        val base = when (AudioDeviceCatalog.categoryFor(device.type)) {
+            OutputCategory.PHONE -> "Speaker"
+            OutputCategory.BLUETOOTH -> "Bluetooth"
+            OutputCategory.WIRED -> "Wired"
+            OutputCategory.USB -> "USB"
+            OutputCategory.OTHER -> "Other"
+        }
+        return if (indexInCategory > 0) "$base ${indexInCategory + 1}" else base
+    }
+
     /**
-     * Candidate combinations worth probing on this device, ordered from most
-     * common to most exotic: speaker+BT, wired+BT, USB+BT, BT+BT. The main
-     * loudspeaker is preferred over the earpiece, which media policy usually
-     * refuses to route.
+     * Every candidate combination worth probing on this device, covering the
+     * required matrix: speaker+BT, BT+BT, wired+BT, USB+BT, speaker+wired,
+     * speaker+USB, wired+USB and the three-way speaker/BT/wired/USB mixes.
+     * Ordered from most common to most exotic. The main loudspeaker is
+     * preferred over the earpiece, which media policy usually refuses to
+     * route. Bounded to at most three Bluetooth devices so the probe stays
+     * predictable in time.
      */
     fun candidateCombinations(devices: List<ProbeDevice>): List<List<ProbeDevice>> {
         val speaker = devices.firstOrNull {
             it.type == AudioDeviceCatalog.TYPE_BUILTIN_SPEAKER ||
                 it.type == AudioDeviceCatalog.TYPE_BUILTIN_SPEAKER_SAFE
         } ?: devices.firstOrNull { it.type == AudioDeviceCatalog.TYPE_BUILTIN_EARPIECE }
-        val bluetooth = devices.filter { it.type in AudioDeviceCatalog.BLUETOOTH_TYPES }.take(2)
+        val bluetooth = devices.filter { it.type in AudioDeviceCatalog.BLUETOOTH_TYPES }.take(3)
         val wired = devices.firstOrNull { it.type in AudioDeviceCatalog.WIRED_TYPES }
         val usb = devices.firstOrNull { it.type in AudioDeviceCatalog.USB_TYPES }
 
         val combos = mutableListOf<List<ProbeDevice>>()
-        bluetooth.forEach { bt ->
-            speaker?.let { combos.add(listOf(it, bt)) }
+        fun add(vararg parts: ProbeDevice?) {
+            val combo = parts.filterNotNull().distinctBy { it.id }
+            if (combo.size >= 2 && combos.none { existing ->
+                    existing.map { it.id } == combo.map { it.id }
+                }
+            ) {
+                combos.add(combo)
+            }
         }
-        wired?.let { w ->
-            bluetooth.firstOrNull()?.let { combos.add(listOf(w, it)) }
+
+        // Pairs first: speaker+BT (each), every BT+BT pair, wired+BT, USB+BT,
+        // speaker+wired, speaker+USB, wired+USB.
+        bluetooth.forEach { bt -> add(speaker, bt) }
+        bluetooth.indices.forEach { i ->
+            (i + 1 until bluetooth.size).forEach { j -> add(bluetooth[i], bluetooth[j]) }
         }
-        usb?.let { u ->
-            bluetooth.firstOrNull()?.let { combos.add(listOf(u, it)) }
-        }
-        if (bluetooth.size >= 2) {
-            combos.add(listOf(bluetooth[0], bluetooth[1]))
-        }
+        wired?.let { w -> bluetooth.firstOrNull()?.let { add(w, it) } }
+        usb?.let { u -> bluetooth.firstOrNull()?.let { add(u, it) } }
+        add(speaker, wired)
+        add(speaker, usb)
+        add(wired, usb)
+
+        // Then the required three-way mixes.
+        if (bluetooth.size >= 2) add(speaker, bluetooth[0], bluetooth[1])
+        add(speaker, bluetooth.firstOrNull(), wired)
+        add(speaker, bluetooth.firstOrNull(), usb)
         return combos
     }
 
     /**
-     * Picks one triple to test whether >2 outputs work: the first passing
-     * pair plus a device from a category not already in that pair.
+     * Derives the full three-level capability model from probed combination
+     * results plus public device identity and OEM detection.
      */
-    fun candidateTriple(
+    fun derive(
         devices: List<ProbeDevice>,
-        results: Map<String, Boolean>
-    ): List<ProbeDevice>? {
-        val passingPair = results.entries
-            .filter { it.value }
-            .mapNotNull { entry ->
-                val ids = entry.key.split("+")
-                devices.filter { it.id in ids }
-            }
-            .firstOrNull { it.size == 2 } ?: return null
-        val usedCategories = passingPair.map { AudioDeviceCatalog.categoryFor(it.type) }.toSet()
-        val extra = devices.firstOrNull {
-            it !in passingPair && AudioDeviceCatalog.categoryFor(it.type) !in usedCategories
-        } ?: return null
-        return passingPair + extra
-    }
-
-    /** Derives the capability model from the probed combination results. */
-    fun derive(devices: List<ProbeDevice>, results: Map<String, Boolean>): MultiOutputCapabilities {
+        results: Map<String, Boolean>,
+        details: Map<String, String> = emptyMap(),
+        names: Map<String, String> = emptyMap(),
+        manufacturer: String = "",
+        brand: String = "",
+        model: String = "",
+        androidVersion: Int = 0,
+        oem: OemCapabilityInfo? = null
+    ): MultiOutputCapability {
         val byId = devices.associateBy { it.id }
         val passing = results.filterValues { it }.keys
 
+        // Per-category counters for stable role labels across the report.
+        var phoneCount = 0
+        var btCount = 0
+        var wiredCount = 0
+        var usbCount = 0
+        var otherCount = 0
+        val labelsById = devices.associate { device ->
+            val n = when (AudioDeviceCatalog.categoryFor(device.type)) {
+                OutputCategory.PHONE -> phoneCount++
+                OutputCategory.BLUETOOTH -> btCount++
+                OutputCategory.WIRED -> wiredCount++
+                OutputCategory.USB -> usbCount++
+                OutputCategory.OTHER -> otherCount++
+            }
+            device.id to labelFor(device, n)
+        }
+
+        val tests = results.map { (key, passed) ->
+            val ids = key.split("+")
+            CapabilityTestResult(
+                key = key,
+                label = ids.mapNotNull { labelsById[it] }.joinToString(" + "),
+                deviceLabels = ids.mapNotNull { labelsById[it] },
+                passed = passed,
+                detail = details[key].orEmpty()
+            )
+        }.sortedWith(compareBy({ it.deviceLabels.size }, { it.label }))
+
         var maxOutputs = 1
-        var multipleBt = false
-        var speakerBt = false
-        var wiredBt = false
-        var usbBt = false
-
         passing.forEach { key ->
-            val combo = key.split("+").mapNotNull { byId[it] }
-            if (combo.size > maxOutputs) maxOutputs = combo.size
-            val categories = combo.map { AudioDeviceCatalog.categoryFor(it.type) }
-            val btCount = categories.count { it == com.prakash.pmusic.domain.model.OutputCategory.BLUETOOTH }
-            if (btCount >= 2) multipleBt = true
-            if (categories.contains(com.prakash.pmusic.domain.model.OutputCategory.PHONE) &&
-                categories.contains(com.prakash.pmusic.domain.model.OutputCategory.BLUETOOTH)
-            ) {
-                speakerBt = true
-            }
-            if (categories.contains(com.prakash.pmusic.domain.model.OutputCategory.WIRED) &&
-                categories.contains(com.prakash.pmusic.domain.model.OutputCategory.BLUETOOTH)
-            ) {
-                wiredBt = true
-            }
-            if (categories.contains(com.prakash.pmusic.domain.model.OutputCategory.USB) &&
-                categories.contains(com.prakash.pmusic.domain.model.OutputCategory.BLUETOOTH)
-            ) {
-                usbBt = true
-            }
+            val size = key.split("+").size
+            if (size > maxOutputs) maxOutputs = size
         }
 
-        val supported = passing.isNotEmpty()
-        val message = when {
+        val oemAvailable = oem?.availableToThirdParty == true
+        val level = when {
+            passing.isNotEmpty() -> MultiOutputLevel.NATIVE_ANDROID
+            oemAvailable -> MultiOutputLevel.OEM_SUPPORTED
+            else -> MultiOutputLevel.UNSUPPORTED
+        }
+        val supported = level != MultiOutputLevel.UNSUPPORTED
+
+        val reason = when {
             devices.isEmpty() -> "No external audio outputs are connected."
-            supported -> "Verified $maxOutputs simultaneous output(s) on this device."
-            else -> "This device did not verify any simultaneous-output combination. " +
-                "Single-output playback still works normally."
+            level == MultiOutputLevel.NATIVE_ANDROID ->
+                "Verified $maxOutputs simultaneous output(s) through plain Android routing."
+            level == MultiOutputLevel.OEM_SUPPORTED ->
+                "${oem!!.detectedFeature} is available to this app and was verified."
+            else ->
+                "Android audio policy does not expose simultaneous routing for this " +
+                    "device/app. Single-output playback continues to work normally."
         }
 
-        return MultiOutputCapabilities(
+        return MultiOutputCapability(
+            level = level,
             supported = supported,
-            maximumOutputs = maxOutputs,
-            supportsMultipleBluetooth = multipleBt,
-            supportsSpeakerAndBluetooth = speakerBt,
-            supportsWiredAndBluetooth = wiredBt,
-            supportsUsbAndBluetooth = usbBt,
-            message = message
+            verifiedOutputCount = maxOutputs,
+            supportedCombinations = passing.toList(),
+            tests = tests,
+            availableDevices = devices.map { d ->
+                com.prakash.pmusic.domain.model.MultiOutputDevice(
+                    id = d.id,
+                    name = names[d.id]?.takeIf { it.isNotBlank() }
+                        ?: AudioDeviceCatalog.labelFor(d.type),
+                    category = AudioDeviceCatalog.categoryFor(d.type),
+                    type = d.type
+                )
+            },
+            unsupportedCombinations = results.filterValues { !it }.keys.toList(),
+            reason = reason,
+            manufacturer = manufacturer,
+            brand = brand,
+            model = model,
+            androidVersion = androidVersion,
+            oem = oem
         )
     }
 }
