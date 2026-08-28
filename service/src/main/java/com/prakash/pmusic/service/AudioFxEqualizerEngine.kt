@@ -199,9 +199,13 @@ class AudioFxEqualizerEngine @Inject constructor(
         val frequencies = (0 until bandCount).map { probe.getCenterFreq(it.toShort()) / 1000 }
         val presets = (0 until probe.numberOfPresets.toInt())
             .map { probe.getPresetName(it.toShort()) }
-        val gains = readGains(probe)
-        val bands = gains.mapIndexed { index, gainMb ->
-            EqualizerBand(frequencyHz = frequencies.getOrElse(index) { 0 }, gainMb = gainMb)
+        val default = range[0] + (range[1] - range[0]) / 2
+        // The default curve starts at the device's neutral level, NOT at
+        // whatever the global output session happens to have (system EQ /
+        // Dolby etc. may pin the "default" bands elsewhere, which made the
+        // equalizer audibly change the volume the moment it was enabled).
+        val bands = (0 until bandCount).map { index ->
+            EqualizerBand(frequencyHz = frequencies.getOrElse(index) { 0 }, gainMb = default)
         }
         probe.release()
         _state.update {
@@ -209,6 +213,7 @@ class AudioFxEqualizerEngine @Inject constructor(
                 supported = true,
                 minGainMb = range[0].toInt(),
                 maxGainMb = range[1].toInt(),
+                defaultGainMb = default.toInt(),
                 bands = bands,
                 presetNames = presets
             )

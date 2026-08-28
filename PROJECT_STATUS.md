@@ -2,7 +2,15 @@
 
 ## Current Sprint
 
-**Sprint 15: Library Folder Manager (`:features:folders`)** — completed.
+**Playback / audio architecture fixes (`:service`)** — completed (on-device verified).
+
+Reports of audio stopping ~10 s in, the equalizer dropping the volume when enabled, and playback stuttering or stopping on app-switch, on the A001T device. All three root-caused and fixed:
+
+1. **Audio stopped ~10 s with the UI still "playing"** — `MultiOutputAudioSink.setListener()` was a no-op and swallowed every `AudioSink.Listener` callback (underruns, sink errors, discontinuities), so the renderer kept reporting healthy playback while the audio was dead. `setListener()` now stores the listener and `createChildLocked()` forwards `onPositionDiscontinuity` / `onUnderrun` / `onSkipSilenceEnabledChanged` / `onAudioSinkError` up to the controller.
+2. **Equalizer dropped the volume when enabled** — `probeLayoutIfNeeded()` initialized band gains from the global output session (which can carry non-zero system EQ levels), so the "default" curve was not neutral. Bands now default to the neutral midpoint, so a flat 0 dB curve is transparent and changes nothing on enable (persisted custom curves still apply over it).
+3. **Background / app-switch stutter or stop** — `connect()` now detects and rebuilds a stale `MediaController` (`!controller.isConnected`), and the service acquired a wake lock (`setWakeMode(C.WAKE_MODE_NETWORK)` on the ExoPlayer) so the CPU stays awake with the screen off.
+
+**Verification (A001T, Android 16 / SDK 36):** build + all unit tests green; playhead advances well past the old 10 s failure point (59 s → 76 s → 121 s, `state=PLAYING`, `error=null`); playback continues backgrounded and with the screen off; Reset-to-flat yields 0 dB on all 5 bands and re-enabling the EQ keeps playback smooth; multi-output probe still runs cleanly; no crashes.
 
 ## Completed Features
 
@@ -112,6 +120,7 @@
 - Genre metadata is frequently absent from MediaStore on real devices, so songs fall back to "Unknown" (handled gracefully). No crashes.
 - Bitrate / sample rate / channel count are not reliably indexed by MediaStore; the File details screen enriches them on demand via `MediaExtractor` (falling back to the indexed values when the file cannot be read). No crashes.
 - Noted during Sprint 3 device testing: scripted `adb input tap` sequences occasionally deliver duplicate taps; single physical taps are handled correctly (no app-side defect).
+- The A001T audio policy does not expose simultaneous output routing (see the multi-output diagnostic report), so Multi-Output Audio is correctly reported as UNSUPPORTED there; single-output playback continues to work normally.
 
 ## Next Sprint
 

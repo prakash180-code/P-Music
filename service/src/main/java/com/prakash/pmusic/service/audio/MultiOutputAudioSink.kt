@@ -73,6 +73,7 @@ class MultiOutputAudioSink(
     private var masterVolume = 1f
 
     private var targets: List<OutputTarget> = emptyList()
+    private var listener: AudioSink.Listener? = null
 
     // ------------------------------------------------------------------
     // Engine-facing configuration
@@ -136,6 +137,37 @@ class MultiOutputAudioSink(
                 Log.e(TAG, "mid-stream child configure failed", e)
             }
         }
+        sink.setListener(object : AudioSink.Listener {
+            override fun onPositionDiscontinuity() {
+                synchronized(lock) {
+                    if (children.isNotEmpty() && children[0].sink === sink) {
+                        listener?.onPositionDiscontinuity()
+                    }
+                }
+            }
+            override fun onUnderrun(bufferSize: Int, elapsedTimeSinceFirstFeedUs: Long, delaySinceStartOfPlay: Long) {
+                synchronized(lock) {
+                    if (children.isNotEmpty() && children[0].sink === sink) {
+                        listener?.onUnderrun(bufferSize, elapsedTimeSinceFirstFeedUs, delaySinceStartOfPlay)
+                    }
+                }
+            }
+            override fun onSkipSilenceEnabledChanged(skipSilenceEnabled: Boolean) {
+                synchronized(lock) {
+                    if (children.isNotEmpty() && children[0].sink === sink) {
+                        listener?.onSkipSilenceEnabledChanged(skipSilenceEnabled)
+                    }
+                }
+            }
+            override fun onAudioSinkError(e: java.lang.Exception) {
+                Log.e(TAG, "child sink error", e)
+                synchronized(lock) {
+                    if (children.isNotEmpty() && children[0].sink === sink) {
+                        listener?.onAudioSinkError(e)
+                    }
+                }
+            }
+        })
         if (isPlaying) sink.play()
         return Child(sink)
     }
@@ -316,9 +348,7 @@ class MultiOutputAudioSink(
     // ------------------------------------------------------------------
 
     override fun setListener(listener: AudioSink.Listener) {
-        // Child events are intentionally not forwarded: the session id is
-        // always set explicitly by PlaybackService, so the renderer learns it
-        // without needing a listener round-trip.
+        this.listener = listener
     }
 
     override fun setPlayerId(playerId: PlayerId?) {

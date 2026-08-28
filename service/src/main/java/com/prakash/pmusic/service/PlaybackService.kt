@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -162,6 +163,9 @@ class PlaybackService : MediaSessionService() {
             setAudioAttributes(AudioAttributes.DEFAULT, /* handleAudioFocus= */ true)
             // Pause when headphones are unplugged.
             setHandleAudioBecomingNoisy(true)
+            // Keep the CPU awake during playback so audio does not stutter
+            // or stop when the screen turns off.
+            setWakeMode(C.WAKE_MODE_NETWORK)
             addListener(playerListener)
         }
 

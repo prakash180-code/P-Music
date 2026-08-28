@@ -114,7 +114,18 @@ class Media3PlaybackController @Inject constructor(
     }
 
     override fun connect() {
-        if (controller != null) return
+        // Recreate a stale/dead controller instead of reusing one whose
+        // session link has broken (e.g. after the service restarted while
+        // the app stayed alive). Without this the controller keeps returning
+        // the default snapshot and playback appears frozen/stuttering.
+        val current = controller
+        if (current != null) {
+            if (current.isConnected) return
+            Log.w(TAG, "connect() dropping stale controller")
+            current.removeListener(playerListener)
+            runCatching { current.release() }
+            controller = null
+        }
         Log.d(TAG, "connect() building MediaController")
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()

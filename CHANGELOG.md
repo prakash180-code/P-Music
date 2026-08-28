@@ -2,6 +2,30 @@
 
 All notable changes to P-Music are documented here.
 
+## [0.15.0 follow-up] - 2026-08-28
+
+### Playback / audio architecture fixes (`:service`) — on-device verified
+
+**1. Audio stopped after ~10 s while the UI kept showing "playing"**
+- Root cause: `MultiOutputAudioSink.setListener()` was a complete no-op — it never stored the `AudioSink.Listener`, so every callback (underruns, `AudioSinkError`, position discontinuities) was silently swallowed. The renderer kept reporting a healthy PLAYING state while the underlying audio was already dead, and the listener that would have let the service re-sync or surface a sink error never fired.
+- Fix (`MultiOutputAudioSink.kt`): added a `listener: AudioSink.Listener?` field; `setListener()` now stores it; `createChildLocked()` wires an anonymous child listener that forwards `onPositionDiscontinuity`, `onUnderrun(bufferSize, elapsedTimeSinceFirstFeedUs, delaySinceStartOfPlay)`, `onSkipSilenceEnabledChanged` and `onAudioSinkError` to the primary controller (guard: only the primary child — `children[0].sink === sink` — forwards, so multi-output fans don't double-report).
+
+**2. Enabling the equalizer caused a volume drop**
+- Root cause: `AudioFxEqualizerEngine.probeLayoutIfNeeded()` initialized every band gain from the global output session (session 0) via `readGains(probe)`. That session can carry non-zero system EQ / Dolby levels, so the "default" curve its bands reported was not neutral — the moment the equalizer attached, it applied those non-zero gains and audibly changed (dropped) the volume.
+- Fix (`AudioFxEqualizerEngine.kt`): each band now initializes to the neutral midpoint `range[0] + (range[1] - range[0]) / 2` instead of `readGains(probe)`. With a flat 0 dB curve the effect is transparent and no longer alters volume when enabled. A user's own persisted custom curve still applies on top (correct override behaviour).
+
+**3. Playback stuttered / stopped when switching apps**
+- Root causes: (a) `Media3PlaybackController.connect()` advanced past a stale/dead `MediaController` (created by a previous session in a now-restarted process) and kept using it; (b) the service never acquired a wake lock, so the CPU could sleep under a dark screen and pause/glitch audio.
+- Fix (a) (`Media3PlaybackController.kt`): `connect()` now detects a stale controller (`controller != null && !controller.isConnected`), logs a warning, removes the listener, releases and nulls it, then rebuilds a fresh controller.
+- Fix (b) (`PlaybackService.kt`): the ExoPlayer now calls `setWakeMode(C.WAKE_MODE_NETWORK)` (plus `import androidx.media3.common.C`), keeping the CPU awake with the screen off.
+
+**Verification (physical device A001T, Android 16 / SDK 36, Media3 1.6.1):**
+- Built + installed (`assembleDebug`), `:service:testDebugUnitTest` and the full `testDebugUnitTest` suite all green.
+- **Bug 1:** `dumpsys media_session` shows `state=PLAYING(3)`, `error=null`; the playhead continuously advances well past the old ~10 s failure point (observed 59 s → 76 s → 121 s).
+- **Bug 3:** with the app backgrounded (Home) and with the **screen off** (`KEYCODE_SLEEP`), the playhead keeps advancing (e.g. 112684 ms → 121699 ms with the screen off) — playback continues and the CPU stays awake.
+- **Bug 2:** "Reset to flat" yields **0 dB on all 5 bands**; re-enabling the equalizer with the flat curve leaves playback smooth (`error=null`, position advancing) — no volume drop.
+- **Regression:** the Multi-Output capability probe still runs cleanly (`capabilities probed: … level=UNSUPPORTED … availableDevices=[A001T speaker]`) with the sink-listener change in place; no crashes.
+
 ## [0.15.0] - 2026-08-07
 
 ### Sprint 15 — Library Folder Manager (`:features:folders`)
