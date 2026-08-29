@@ -78,4 +78,33 @@ object Migrations {
             )
         }
     }
+
+    /** v4 → v5: adds the persisted last-playback session table. */
+    val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `playback_state` (
+                    `id` INTEGER NOT NULL,
+                    `queueJson` TEXT NOT NULL,
+                    `currentQueueIndex` INTEGER NOT NULL,
+                    `mediaId` INTEGER,
+                    `mediaUri` TEXT,
+                    `songTitle` TEXT,
+                    `artist` TEXT,
+                    `album` TEXT,
+                    `albumArtworkPath` TEXT,
+                    `positionMs` INTEGER NOT NULL,
+                    `durationMs` INTEGER NOT NULL,
+                    `playbackSpeed` REAL NOT NULL,
+                    `repeatMode` TEXT NOT NULL,
+                    `shuffleEnabled` INTEGER NOT NULL,
+                    `wasPlaying` INTEGER NOT NULL,
+                    `savedAtNanos` INTEGER NOT NULL,
+                    PRIMARY KEY(`id`)
+                )
+                """.trimIndent()
+            )
+        }
+    }
 }

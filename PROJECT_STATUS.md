@@ -2,15 +2,15 @@
 
 ## Current Sprint
 
-**Playback / audio architecture fixes (`:service`)** — completed (on-device verified).
+**Playback session persistence / "Resume playback"** — completed (on-device verified).
 
-Reports of audio stopping ~10 s in, the equalizer dropping the volume when enabled, and playback stuttering or stopping on app-switch, on the A001T device. All three root-caused and fixed:
+Playback state (current song, queue, position, repeat/shuffle/speed) is now persisted to Room so the app restores the last session on every launch instead of starting empty. Before this, nothing survived the process dying (app swipe-away, force-stop, service kill): the controller's in-memory queue was lost and `connect()` built into an empty service player, so `currentSong=null` and the Mini Player never reappeared. Media3 1.6.1 has no built-in playback-state persistence, so this was implemented manually.
 
-1. **Audio stopped ~10 s with the UI still "playing"** — `MultiOutputAudioSink.setListener()` was a no-op and swallowed every `AudioSink.Listener` callback (underruns, sink errors, discontinuities), so the renderer kept reporting healthy playback while the audio was dead. `setListener()` now stores the listener and `createChildLocked()` forwards `onPositionDiscontinuity` / `onUnderrun` / `onSkipSilenceEnabledChanged` / `onAudioSinkError` up to the controller.
-2. **Equalizer dropped the volume when enabled** — `probeLayoutIfNeeded()` initialized band gains from the global output session (which can carry non-zero system EQ levels), so the "default" curve was not neutral. Bands now default to the neutral midpoint, so a flat 0 dB curve is transparent and changes nothing on enable (persisted custom curves still apply over it).
-3. **Background / app-switch stutter or stop** — `connect()` now detects and rebuilds a stale `MediaController` (`!controller.isConnected`), and the service acquired a wake lock (`setWakeMode(C.WAKE_MODE_NETWORK)` on the ExoPlayer) so the CPU stays awake with the screen off.
+- **Persistence layer (Room v4→v5):** new `SavedPlaybackState` domain model + `PlaybackStateRepository`; single-row `playback_state` table (`PlaybackStateEntity` + DAO), `MIGRATION_4_5`, exported schema `5.json`; `PlaybackStateCodec` (escaped string serializer) + `PlaybackStateMappers` + Room-backed `PlaybackStateRepositoryImpl`, bound via Hilt. 9 new unit tests (round-trip, empty, malformed/escaped input).
+- **Controller (`:service`):** on `connect()` with no pending external URI and an empty queue it restores the last session — verifies the current file still exists (`ContentResolver`; if gone it clears the stale state), rebuilds the queue dropping missing files, re-derives the index, clamps the position, and applies `setMediaItems` + shuffle/repeat/speed + `prepare()` with **no** `play()` (restores paused). Saves on events (pause/seek/song-change/modes/speed/queue + every media-item transition), periodically every 3 s while playing, and via `flushPlaybackState()` from `PlaybackService.onDestroy`/`onTaskRemoved`. External `ACTION_VIEW` file playback is excluded from persistence.
+- **Behavior:** next launch shows the Mini Player with the previous song and a paused state; pressing play resumes from the saved position; deleted files are skipped instead of leaving a dead player.
 
-**Verification (A001T, Android 16 / SDK 36):** build + all unit tests green; playhead advances well past the old 10 s failure point (59 s → 76 s → 121 s, `state=PLAYING`, `error=null`); playback continues backgrounded and with the screen off; Reset-to-flat yields 0 dB on all 5 bands and re-enabling the EQ keeps playback smooth; multi-output probe still runs cleanly; no crashes.
+**Verification (A001T, Android 16 / SDK 36):** full `testDebugUnitTest` suite + `assembleDebug` green; Room v4→v5 migration ran cleanly (no exceptions, correct `playback_state` schema); force-stop then relaunch → `dumpsys media_session` shows `PAUSED(2)` at the exact saved position (e.g. 96576 ms) with the same item, the Mini Player bar renders the restored song with a Play (paused) state, and pressing play resumes the advancing playhead; external-URI playback writes no saved session; logcat clean, no crashes.
 
 ## Completed Features
 
@@ -110,6 +110,12 @@ Reports of audio stopping ~10 s in, the equalizer dropping the volume when enabl
   - `:data`: `LibraryFolderRepositoryImpl` (purges newly-hidden songs + reconciliation rescan on rule changes), `MediaLibraryScanner` folder-rule filtering (two-pass: allowed-id collection, then enriched upsert of allowed rows only), `NonMusicFolderDetector` + `NonMusicFolderClassifier` (name + short-clip heuristics; recursive **music-container guard**; 18 tests), `MediaStoreWatcher` (@Singleton, debounced content observer, idempotent start).
   - `:app`: Settings gained a Folder Manager row (`onOpenFolderManager`); `AppRootScreen` hosts the folder-manager screen + wizard overlays; `MainActivity` starts `MediaStoreWatcher`; version bumped to 0.15.0 (versionCode 15). Also fixed pre-existing lint `@OptIn(UnstableApi::class)` on `PlaybackService`/`PMusicMediaButtonReceiver` and the API-33 `getPackageInfo` guard in the About row.
   - Verified on device (1789-song library): the detector initially suggested excluding the SD card's music container (`…/Recordings (1)`, which recursively holds 1,775 songs) — excluding it wiped the library to 14 songs, which exposed the false positive. The recursive music-container guard fixed it: the wizard now suggests only the genuine recording folders (12 internal + 4 SD card files), **Exclude recommended** purged exactly those 16 (1789 → **1773**, all music intact), Add folder / card switch / actions menu / rules + library persistence across force-stop all verified, playback still starts after the lint fixes (STATE_PLAYING, position advancing), 114 unit tests + lint (0 errors) green, logcat clean, no crashes.
+- **Playback session persistence / "Resume playback":**
+  - `:domain`: `SavedPlaybackState` model (queue, current index, media id/uri, title/artist/album/artwork, position/duration, speed, repeat, shuffle, wasPlaying, savedAtNanos, `isEmpty`) + `PlaybackStateRepository` contract.
+  - `:core:database` v5: `PlaybackStateEntity` + `PlaybackStateDao` (get/upsert/clear), `MIGRATION_4_5`, exported schema `5.json`, DAO binding in `DatabaseModule`.
+  - `:data`: `PlaybackStateCodec` (string serializer escaping `\n`/field-separator/escape chars) + `PlaybackStateMappers` + Room-backed `PlaybackStateRepositoryImpl` (IO dispatcher, skips empty saves) + 9 unit tests, bound in `RepositoryModule`.
+  - `:service`: `Media3PlaybackController` restores the last session on `connect()` (empty queue, no external URI) — `mediaExists()` check drops disappeared files, index re-derivation, position clamp, `setMediaItems` + shuffle/repeat/speed + `prepare()` (no auto-play, stays paused); saves via `saveOnEvent` / `maybePeriodicSave` (3 s while playing) / `flushPlaybackState()`; `PlaybackService.onDestroy`/`onTaskRemoved` flush. `:core:media` `Song.contentUri()` reused for save/restore lookups. External `ACTION_VIEW` playback excluded from all save paths.
+  - Verified on device: force-stop then relaunch restores PAUSED at the exact saved position with the correct song/queue, the Mini Player reappears with the restored track, and Play resumes; migration clean; no crashes.
 
 ## Pending Features
 
@@ -121,6 +127,7 @@ Reports of audio stopping ~10 s in, the equalizer dropping the volume when enabl
 - Bitrate / sample rate / channel count are not reliably indexed by MediaStore; the File details screen enriches them on demand via `MediaExtractor` (falling back to the indexed values when the file cannot be read). No crashes.
 - Noted during Sprint 3 device testing: scripted `adb input tap` sequences occasionally deliver duplicate taps; single physical taps are handled correctly (no app-side defect).
 - The A001T audio policy does not expose simultaneous output routing (see the multi-output diagnostic report), so Multi-Output Audio is correctly reported as UNSUPPORTED there; single-output playback continues to work normally.
+- Playback sessions always restore **paused** on launch (by design — no auto-resume, no new setting). Only library playback (a queue loaded through the app) is persisted; opening an external file via `ACTION_VIEW` is not persisted.
 
 ## Next Sprint
 

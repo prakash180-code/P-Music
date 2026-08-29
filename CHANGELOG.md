@@ -2,6 +2,28 @@
 
 All notable changes to P-Music are documented here.
 
+## [0.15.1] - 2026-08-30
+
+### Playback session persistence / "Resume playback" (`:service`, `:data`, `:core:database`, `:domain`)
+
+**Problem:** nothing about the playback session was persisted. When the process died (app swipe-away, force-stop, service kill) the controller's in-memory queue was lost and on the next open `connect()` built a controller into an empty service player — `currentSong=null`, so the Mini Player never reappeared and playback always started from scratch. Media3 1.6.1 offers no built-in playback-state persistence, so this had to be implemented manually.
+
+**Persistence layer (Room-backed, DB v4→v5):**
+- `SavedPlaybackState` (`:domain`) — queue (list of `Song`s), `currentQueueIndex`, `mediaId`, `mediaUri`, title/artist/album/artwork, `positionMs`, `durationMs`, `playbackSpeed`, `repeatMode`, `shuffleEnabled`, `wasPlaying`, `savedAtNanos`, and an `isEmpty` helper for "nothing to save".
+- `PlaybackStateRepository` (`:domain`) contract — `save` / `load` / `clear`.
+- `PlaybackStateEntity` + `PlaybackStateDao` + `MIGRATION_4_5` (+ registered in `DatabaseModule`), `PMusicDatabase` bumped to version 5 with the new single-row `playback_state` table and an exported schema `5.json`; `PlaybackStateCodec` (pure string serializer with escaped `\n`/field-separator/escape chars), `PlaybackStateMappers`, `PlaybackStateRepositoryImpl` (IO dispatcher, skips empty saves), binding in `RepositoryModule`.
+- 9 new unit tests in `:data` (`PlaybackStateCodecTest`) covering round-trips, empty state, malformed lines, and embedded newlines/escape chars.
+
+**Service / controller (`:service`):**
+- `Media3PlaybackController` — injects `PlaybackStateRepository`; on `connect()` with no pending external URI and an empty queue it calls `restoreLastSession(player)`; `restore()` verifies the current file still exists (`mediaExists` via `ContentResolver` — if gone it clears the saved state), rebuilds the queue dropping any missing files, re-derives the index, clamps the position to `0..duration`, and applies `setMediaItems(items, index, position)` + shuffle/repeat/speed + `prepare()` — deliberately **no** `play()`, so the session always comes back paused.
+- Saves: `saveOnEvent` (on pause/seek/song-change/mode/speed/queue actions and every `EVENT_MEDIA_ITEM_TRANSITION`), `maybePeriodicSave` (throttled every 3 s while playing), `flushPlaybackState` (final flush).
+- `PlaybackService` — calls `flushPlaybackState()` from `onDestroy` / `onTaskRemoved` so the last known-good song/position survive an app or service kill.
+- External-file playback (`ACTION_VIEW` of a URI) is deliberately excluded from all save paths (`pendingExternalUri` / `externalPlayback` guards).
+
+**Behavior:** on the next launch the previous song, queue, position, repeat/shuffle/speed are restored into a paused player; the Mini Player reappears with the restored song and pressing Play resumes from the saved position. A song whose file has been deleted is skipped and the index corrected rather than leaving a dead player.
+
+**Verification (physical device A001T, Android 16 / SDK 36, Media3 1.6.1):** full `testDebugUnitTest` suite green + `assembleDebug` OK; Room v4→v5 migration ran cleanly (no exceptions, `playback_state` table created with correct schema); on device after force-stop + relaunch `dumpsys media_session` shows `PAUSED(2)` at the exact saved position (e.g. 96576 ms) with the same item; pressing play resumes and the playhead advances; the Mini Player bar renders above the nav bar with the restored song and a Play (paused) state; external-URI playback does not write a saved session.
+
 ## [0.15.0 follow-up] - 2026-08-28
 
 ### Playback / audio architecture fixes (`:service`) — on-device verified

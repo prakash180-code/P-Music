@@ -16,6 +16,15 @@ import java.io.File
  */
 
 /**
+ * The MediaStore content Uri for a library song's [Song.id]. Library ids map
+ * 1:1 to MediaStore audio ids, so playback always resolves a stable row.
+ */
+fun Song.contentUri(): Uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+    .buildUpon()
+    .appendPath(id.toString())
+    .build()
+
+/**
  * Builds a playable [MediaItem] from a domain [Song].
  *
  * - `mediaId` is the song id (used to seek back to the row in the UI).
@@ -25,10 +34,7 @@ import java.io.File
  *   controls show title, artist, album and artwork.
  */
 fun Song.toMediaItem(): MediaItem {
-    val contentUri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        .buildUpon()
-        .appendPath(id.toString())
-        .build()
+    val contentUri = contentUri()
 
     return MediaItem.Builder()
         .setMediaId(id.toString())

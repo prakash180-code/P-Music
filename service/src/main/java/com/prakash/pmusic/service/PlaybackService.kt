@@ -83,6 +83,9 @@ class PlaybackService : MediaSessionService() {
     @Inject
     lateinit var libraryRepository: LibraryRepository
 
+    @Inject
+    lateinit var playbackController: Media3PlaybackController
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /** Id of the current media item's song, read from the MediaItem mediaId. */
@@ -242,6 +245,9 @@ class PlaybackService : MediaSessionService() {
         mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        // Flush the current session to disk so the last song/position survive
+        // swiping the app away.
+        playbackController.flushPlaybackState()
         // Do not linger as a ghost process when the user swipes the app away
         // while nothing is playing.
         val player = mediaSession?.player
@@ -251,6 +257,9 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        // Persist the last known playback state before the player is released
+        // so a later reopen can restore it (also covers process death paths).
+        playbackController.flushPlaybackState()
         serviceScope.cancel()
         mediaSession?.run {
             player.release()

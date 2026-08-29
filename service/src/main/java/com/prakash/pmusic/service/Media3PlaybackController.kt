@@ -1,6 +1,7 @@
 package com.prakash.pmusic.service
 
 import android.content.ComponentName
+import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -11,19 +12,23 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.prakash.pmusic.core.media.contentUri
 import com.prakash.pmusic.core.media.toDomainRepeatMode
 import com.prakash.pmusic.core.media.toMediaItem
 import com.prakash.pmusic.core.media.toPlayerRepeatMode
 import com.prakash.pmusic.core.media.toSong
+import android.database.Cursor
 import com.prakash.pmusic.domain.model.EqualizerState
 import com.prakash.pmusic.domain.model.MultiOutputCapability
 import com.prakash.pmusic.domain.model.MultiOutputDevice
 import com.prakash.pmusic.domain.model.MultiOutputState
 import com.prakash.pmusic.domain.model.PlaybackState
 import com.prakash.pmusic.domain.model.RepeatMode
+import com.prakash.pmusic.domain.model.SavedPlaybackState
 import com.prakash.pmusic.domain.model.Song
 import com.prakash.pmusic.domain.repository.LibraryRepository
 import com.prakash.pmusic.domain.repository.PlaybackController
+import com.prakash.pmusic.domain.repository.PlaybackStateRepository
 import com.prakash.pmusic.domain.repository.PreferencesRepository
 import com.prakash.pmusic.service.audio.MultiOutputEngine
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -40,6 +45,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * UI-facing playback controller that talks to [PlaybackService] through a
@@ -61,6 +67,7 @@ class Media3PlaybackController @Inject constructor(
     @ApplicationContext private val context: Context,
     private val preferencesRepository: PreferencesRepository,
     private val libraryRepository: LibraryRepository,
+    private val playbackStateRepository: PlaybackStateRepository,
     private val equalizerEngine: AudioFxEqualizerEngine,
     private val multiOutputEngine: MultiOutputEngine
 ) : PlaybackController {
@@ -94,6 +101,15 @@ class Media3PlaybackController @Inject constructor(
     /** Id of the song most recently recorded as played (dedupes events). */
     private var lastRecordedSongId: Long? = null
 
+    /** Guards against re-restoring while a restoration is in flight. */
+    private var restoring = false
+
+    /** Last time a periodic save ran (monotonic ms), to throttle disk writes. */
+    private var lastPeriodicSaveMs = 0L
+
+    /** The last song id that was persisted as current, to detect song changes. */
+    private var lastSavedSongId: Long? = null
+
     init {
         scope.launch {
             preferencesRepository.preferences.collect { prefs ->
@@ -109,6 +125,14 @@ class Media3PlaybackController @Inject constructor(
             recordPlayIfNeeded(player)
             if (player.playbackState == Player.STATE_READY && player.isPlaying) {
                 equalizerEngine.notifyPlaybackActive()
+            }
+            // Persist periodically while playing (throttled) and immediately on
+            // any media-item transition so the saved "current song" never lags
+            // behind what is actually playing.
+            if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+                saveOnEvent(player)
+            } else {
+                maybePeriodicSave(player)
             }
         }
     }
@@ -144,9 +168,104 @@ class Media3PlaybackController @Inject constructor(
                     pendingExternalUri = null
                     playExternalAudioNow(connected, uri)
                 }
+                // Restore the last playback session (queue/song/position/modes)
+                // only when there is no fresh external URI to play instead.
+                if (pendingExternalUri == null && queue.isEmpty()) {
+                    restoreLastSession(connected)
+                }
             },
             ContextCompat.getMainExecutor(context)
         )
+    }
+
+    /**
+     * Loads the last persisted session and, if the current file still exists,
+     * restores the queue, current song, position and mode flags onto the player
+     * — remaining paused (playback never auto-starts on app open).
+     */
+    private fun restoreLastSession(player: Player) {
+        if (restoring) return
+        restoring = true
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) { playbackStateRepository.load() }
+            if (saved == null || saved.isEmpty) {
+                restoring = false
+                return@launch
+            }
+            restore(player, saved)
+            restoring = false
+        }
+    }
+
+    @Suppress("CyclomaticComplexMethod")
+    private fun restore(player: Player, saved: SavedPlaybackState) {
+        // Verify the current media file still exists; if it is gone, the saved
+        // session is stale and must be dropped so we never show a dead player.
+        if (!mediaExists(saved.mediaUri)) {
+            Log.i(TAG, "restore: current media no longer exists, clearing saved state")
+            scope.launch { playbackStateRepository.clear() }
+            return
+        }
+
+        // Rebuild the queue, dropping any songs whose files have disappeared,
+        // and re-derive the current index so it stays valid.
+        val restored = saved.queue.filter { mediaExists(it.contentUri().toString()) }
+        if (restored.isEmpty()) {
+            scope.launch { playbackStateRepository.clear() }
+            return
+        }
+        val requestedIndex = saved.currentQueueIndex.coerceIn(0, saved.queue.size - 1)
+        val requestedId = saved.queue.getOrNull(requestedIndex)?.id
+        val index = restored.indexOfFirst { it.id == requestedId }
+            .takeIf { it >= 0 } ?: 0
+
+        // Position validation: clamp to a sane range and reset to the start when
+        // the saved position is out of bounds or effectively at the end.
+        val duration = restored.getOrNull(index)?.durationMs
+            ?.takeIf { it > 0L } ?: saved.durationMs
+        val position = if (saved.positionMs in 0L until duration) saved.positionMs else 0L
+
+        queue = restored
+        val items = restored.map { it.toMediaItem() }
+        runCatching {
+            player.setMediaItems(items, index, position)
+            player.shuffleModeEnabled = saved.shuffleEnabled
+            player.repeatMode = saved.repeatMode.toPlayerRepeatMode()
+            player.setPlaybackSpeed(saved.playbackSpeed)
+            player.prepare()
+            // Deliberately do NOT call play(): restoration stays paused.
+        }
+        lastRecordedSongId = restored.getOrNull(index)?.id
+        lastSavedSongId = restored.getOrNull(index)?.id
+        Log.i(
+            TAG,
+            "restore: restored ${restored.size} songs at index $index, " +
+                "position ${position}ms, speed ${saved.playbackSpeed}, " +
+                "shuffle=${saved.shuffleEnabled}, repeat=${saved.repeatMode}"
+        )
+        syncState(player)
+        Log.i(
+            TAG,
+            "restore: after sync currentMediaItemIndex=${player.currentMediaItemIndex} " +
+                "currentSong=${_playbackState.value.currentSong?.title}"
+        )
+    }
+
+    /** True when the content resolver can still resolve [uri] to a row. */
+    private fun mediaExists(uriString: String?): Boolean {
+        val uri = uriString?.let(Uri::parse) ?: return false
+        if (uri.scheme.isNullOrBlank()) return false
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+        val resolver = context.contentResolver
+        var cursor: Cursor? = null
+        return try {
+            cursor = resolver.query(uri, arrayOf("_id"), null, null, null)
+            cursor != null && cursor.moveToFirst()
+        } catch (_: Exception) {
+            false
+        } finally {
+            cursor?.close()
+        }
     }
 
     override fun disconnect() {
@@ -159,6 +278,82 @@ class Media3PlaybackController @Inject constructor(
         pendingExternalUri = null
         externalPlayback = false
         lastRecordedSongId = null
+        lastSavedSongId = null
+        restoring = false
+    }
+
+    /**
+     * Persists the current playback session immediately. Called by the UI for
+     * a final flush and by the service before it is torn down, so the last
+     * known good song/position survive an app or service kill.
+     */
+    fun flushPlaybackState() {
+        val player = controller ?: return
+        if (externalPlayback) return
+        if (player.mediaItemCount == 0) {
+            scope.launch { playbackStateRepository.clear() }
+            return
+        }
+        val snapshot = snapshotSavedState(player)
+        if (snapshot.isEmpty) {
+            scope.launch { playbackStateRepository.clear() }
+        } else {
+            scope.launch { playbackStateRepository.save(snapshot) }
+        }
+    }
+
+    /** Builds a [SavedPlaybackState] snapshot of the current player state. */
+    private fun snapshotSavedState(player: Player): SavedPlaybackState {
+        val index = player.currentMediaItemIndex
+        val current = queue.getOrNull(index)
+        if (current == null) return SavedPlaybackState()
+        val position = player.currentPosition.takeIf { it > 0L } ?: 0L
+        val duration = player.duration.takeIf { it > 0L } ?: current.durationMs
+        return SavedPlaybackState(
+            queue = queue,
+            currentQueueIndex = index,
+            mediaId = current.id,
+            mediaUri = current.contentUri().toString(),
+            songTitle = current.title,
+            artist = current.artist,
+            album = current.album,
+            albumArtworkPath = current.artPath,
+            positionMs = position,
+            durationMs = duration,
+            playbackSpeed = player.playbackParameters.speed,
+            repeatMode = player.repeatMode.toDomainRepeatMode(),
+            shuffleEnabled = player.shuffleModeEnabled,
+            wasPlaying = player.isPlaying,
+            savedAtNanos = System.nanoTime()
+        )
+    }
+
+    /** Throttled periodic save while playing (every [SAVE_INTERVAL_MS]). */
+    private fun maybePeriodicSave(player: Player) {
+        if (externalPlayback) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastPeriodicSaveMs < SAVE_INTERVAL_MS) return
+        lastPeriodicSaveMs = now
+        val snapshot = snapshotSavedState(player)
+        if (snapshot.isEmpty) return
+        val id = snapshot.mediaId
+        // Always persist the latest position, but only emit a fresh disk write
+        // for song changes at most; the position updates ride along each save.
+        if (id != null && lastSavedSongId != id) {
+            lastSavedSongId = id
+        }
+        scope.launch { playbackStateRepository.save(snapshot) }
+    }
+
+    /** Saves state in response to a discrete event (pause/seek/song change). */
+    private fun saveOnEvent(player: Player) {
+        val snapshot = snapshotSavedState(player)
+        if (snapshot.isEmpty) {
+            scope.launch { playbackStateRepository.clear() }
+        } else {
+            lastSavedSongId = snapshot.mediaId
+            scope.launch { playbackStateRepository.save(snapshot) }
+        }
     }
 
     override fun playSong(song: Song) {
@@ -171,6 +366,7 @@ class Media3PlaybackController @Inject constructor(
         player.prepare()
         player.setPlaybackSpeed(defaultPlaybackSpeed)
         player.play()
+        saveOnEvent(player)
     }
 
     override fun playQueue(queue: List<Song>, startIndex: Int) {
@@ -184,6 +380,7 @@ class Media3PlaybackController @Inject constructor(
         player.prepare()
         player.setPlaybackSpeed(defaultPlaybackSpeed)
         player.play()
+        saveOnEvent(player)
     }
 
     override fun playExternalAudio(uri: String) {
@@ -277,23 +474,33 @@ class Media3PlaybackController @Inject constructor(
 
     override fun pause() {
         controller?.pause()
+        controller?.let { saveOnEvent(it) }
     }
 
     override fun togglePlayPause() {
         val player = controller ?: return
-        if (player.isPlaying) player.pause() else player.play()
+        if (player.isPlaying) {
+            player.pause()
+        } else {
+            player.play()
+        }
+        // Persist on pause; on resume the periodic ticker keeps state fresh.
+        if (!player.isPlaying) saveOnEvent(player)
     }
 
     override fun seekTo(positionMs: Long) {
         controller?.seekTo(positionMs)
+        controller?.let { saveOnEvent(it) }
     }
 
     override fun next() {
         controller?.seekToNextMediaItem()
+        controller?.let { saveOnEvent(it) }
     }
 
     override fun previous() {
         controller?.seekToPreviousMediaItem()
+        controller?.let { saveOnEvent(it) }
     }
 
     override fun jumpToQueueIndex(index: Int) {
@@ -302,6 +509,7 @@ class Media3PlaybackController @Inject constructor(
         player.seekTo(index, 0L)
         player.setPlaybackSpeed(defaultPlaybackSpeed)
         player.play()
+        saveOnEvent(player)
     }
 
     override fun removeCurrentSong() {
@@ -314,25 +522,32 @@ class Media3PlaybackController @Inject constructor(
             player.stop()
             player.clearMediaItems()
             queue = emptyList()
+            // Nothing left to play: drop the persisted session too.
+            scope.launch { playbackStateRepository.clear() }
+            lastSavedSongId = null
         } else {
             // The player auto-advances to the item that takes the removed
             // one's place, keeping playback going.
             player.removeMediaItem(index)
             queue = queue.filterIndexed { i, _ -> i != index }
+            saveOnEvent(player)
         }
         syncState(player)
     }
 
     override fun setShuffleEnabled(enabled: Boolean) {
         controller?.shuffleModeEnabled = enabled
+        controller?.let { saveOnEvent(it) }
     }
 
     override fun setRepeatMode(mode: RepeatMode) {
         controller?.repeatMode = mode.toPlayerRepeatMode()
+        controller?.let { saveOnEvent(it) }
     }
 
     override fun setPlaybackSpeed(speed: Float) {
         controller?.setPlaybackSpeed(speed)
+        controller?.let { saveOnEvent(it) }
     }
 
     override fun setEqualizerEnabled(enabled: Boolean) = equalizerEngine.setEnabled(enabled)
@@ -424,6 +639,8 @@ class Media3PlaybackController @Inject constructor(
 
     private companion object {
         const val POSITION_TICK_MS = 500L
+        /** How often the playback position is persisted to Room while playing. */
+        const val SAVE_INTERVAL_MS = 3_000L
         const val TAG = "PMusicPlayback"
     }
 }
