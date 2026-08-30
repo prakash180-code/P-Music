@@ -5,6 +5,8 @@ import android.media.audiofx.Equalizer
 import android.util.Log
 import com.prakash.pmusic.domain.model.EqualizerBand
 import com.prakash.pmusic.domain.model.EqualizerState
+import com.prakash.pmusic.domain.model.PlaybackLogLevel
+import com.prakash.pmusic.domain.repository.PlaybackLogger
 import com.prakash.pmusic.domain.repository.PreferencesRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -39,7 +41,8 @@ import kotlinx.coroutines.launch
 @Singleton
 class AudioFxEqualizerEngine @Inject constructor(
     @ApplicationContext context: Context,
-    private val preferencesRepository: PreferencesRepository
+    private val preferencesRepository: PreferencesRepository,
+    private val playbackLogger: PlaybackLogger
 ) {
 
     companion object {
@@ -47,6 +50,7 @@ class AudioFxEqualizerEngine @Inject constructor(
         private const val SESSION_ID_UNSET = -1
 
         private const val TAG = "PMusicEqualizer"
+        private const val COMPONENT = "EQUALIZER"
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -92,7 +96,6 @@ class AudioFxEqualizerEngine @Inject constructor(
             applyPersisted(lastEnabled, lastGains, lastPresetIndex)
         }
     }
-
     /**
      * Points the effect at the audio session the player actually created.
      * Called by [PlaybackService] once the player is assigned a generated
@@ -102,9 +105,16 @@ class AudioFxEqualizerEngine @Inject constructor(
     fun setAudioSessionId(sessionId: Int) {
         if (sessionId <= 0 || sessionId == this.sessionId) return
         Log.i(TAG, "setAudioSessionId($sessionId) re-binding effect")
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "EFFECT_REBIND",
+            "reason=audioSessionChanged sessionId=$sessionId previous=${
+                if (this.sessionId == SESSION_ID_UNSET) "unset" else this.sessionId
+            }"
+        )
         this.sessionId = sessionId
         effect?.let {
             runCatching { it.release() }
+            playbackLogger.log(PlaybackLogLevel.INFO, COMPONENT, "EFFECT_DETACHED", "sessionId=$sessionId")
             effect = null
         }
         if (ensureEffect() != null) {
@@ -191,6 +201,10 @@ class AudioFxEqualizerEngine @Inject constructor(
         val probe = runCatching { Equalizer(0, 0) }.getOrNull()
         if (probe == null) {
             Log.w(TAG, "probeLayoutIfNeeded() no Equalizer effect on this device")
+            playbackLogger.log(
+                PlaybackLogLevel.WARN, COMPONENT, "EFFECT_PROBE_FAILED",
+                "reason=noEqualizerEffect"
+            )
             return
         }
         val range = probe.bandLevelRange
@@ -230,9 +244,17 @@ class AudioFxEqualizerEngine @Inject constructor(
         val created = runCatching { Equalizer(0, sessionId) }.getOrNull()
         if (created == null) {
             Log.d(TAG, "ensureEffect() session $sessionId not ready yet")
+            playbackLogger.log(
+                PlaybackLogLevel.WARN, COMPONENT, "EFFECT_ATTACH_FAILED",
+                "sessionId=$sessionId reason=createReturnedNull"
+            )
             return null
         }
         Log.i(TAG, "ensureEffect() bound to session $sessionId")
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "EFFECT_ATTACHED",
+            "sessionId=$sessionId"
+        )
         effect = created
         return created
     }

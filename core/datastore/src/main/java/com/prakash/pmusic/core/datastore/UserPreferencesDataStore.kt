@@ -51,6 +51,7 @@ class UserPreferencesDataStore @Inject constructor(
         val AUTO_INCLUDE_NEW_OUTPUTS = booleanPreferencesKey("auto_include_new_outputs")
         val REMEMBER_OUTPUT_SELECTION = booleanPreferencesKey("remember_output_selection")
         val REMEMBERED_OUTPUT_IDS = stringSetPreferencesKey("remembered_output_ids")
+        val PLAYBACK_DEBUG_LOGGING = booleanPreferencesKey("playback_debug_logging")
     }
 
     /** Reactive snapshot of the current preferences. */
@@ -114,6 +115,10 @@ class UserPreferencesDataStore @Inject constructor(
         }
     }
 
+    suspend fun setPlaybackDebugLogging(enabled: Boolean) {
+        context.pmusicDataStore.edit { it[Keys.PLAYBACK_DEBUG_LOGGING] = enabled }
+    }
+
     private fun Preferences.toAppPreferences(): AppPreferences {
         val themeName = this[Keys.THEME_MODE]
         return AppPreferences(
@@ -131,7 +136,8 @@ class UserPreferencesDataStore @Inject constructor(
             lastMediaStoreVersion = this[Keys.LAST_MEDIA_STORE_VERSION],
             autoIncludeNewOutputs = this[Keys.AUTO_INCLUDE_NEW_OUTPUTS] ?: false,
             rememberOutputSelection = this[Keys.REMEMBER_OUTPUT_SELECTION] ?: true,
-            rememberedOutputIds = this[Keys.REMEMBERED_OUTPUT_IDS] ?: emptySet()
+            rememberedOutputIds = this[Keys.REMEMBERED_OUTPUT_IDS] ?: emptySet(),
+            playbackDebugLogging = this[Keys.PLAYBACK_DEBUG_LOGGING] ?: false
         )
     }
 }

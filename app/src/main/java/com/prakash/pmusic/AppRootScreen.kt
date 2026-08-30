@@ -39,6 +39,7 @@ import com.prakash.pmusic.features.search.ui.FavoritesScreen
 import com.prakash.pmusic.features.search.ui.SearchScreen
 import com.prakash.pmusic.features.settings.ui.MultiOutputScreen
 import com.prakash.pmusic.features.settings.ui.SettingsScreen
+import com.prakash.pmusic.features.settings.ui.DiagnosticsScreen
 import com.prakash.pmusic.features.statistics.ui.StatisticsScreen
 import com.prakash.pmusic.features.equalizer.ui.EqualizerScreen
 import com.prakash.pmusic.features.folders.ui.FolderManagerScreen
@@ -79,6 +80,7 @@ fun AppRootScreen(openNowPlayingSignal: Int = 0) {
     var showMultiOutput by rememberSaveable { mutableStateOf(false) }
     var showAudioOutputs by rememberSaveable { mutableStateOf(false) }
     var showFileDetails by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showDiagnostics by rememberSaveable { mutableStateOf(false) }
 
     val playerViewModel: PlayerViewModel = hiltViewModel()
     val playbackState by playerViewModel.playbackState.collectAsState()
@@ -138,6 +140,7 @@ fun AppRootScreen(openNowPlayingSignal: Int = 0) {
                         showEqualizer -> EqualizerScreen(onBack = { showEqualizer = false })
                         showFolderManager -> FolderManagerScreen(onBack = { showFolderManager = false })
                         showMultiOutput -> MultiOutputScreen(onBack = { showMultiOutput = false })
+                        showDiagnostics -> DiagnosticsScreen(onBack = { showDiagnostics = false })
                         showStatistics -> StatisticsScreen(
                             onBack = { showStatistics = false },
                             onOpenFileDetails = { showFileDetails = it.id }
@@ -146,7 +149,8 @@ fun AppRootScreen(openNowPlayingSignal: Int = 0) {
                             onOpenStatistics = { showStatistics = true },
                             onOpenEqualizer = { showEqualizer = true },
                             onOpenFolderManager = { showFolderManager = true },
-                            onOpenMultiOutput = { showMultiOutput = true }
+                            onOpenMultiOutput = { showMultiOutput = true },
+                            onOpenDiagnostics = { showDiagnostics = true }
                         )
                     }
                 }

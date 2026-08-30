@@ -3,6 +3,7 @@ package com.prakash.pmusic
 import android.app.Application
 import com.prakash.pmusic.features.widgets.PlaybackWidgetManager
 import dagger.hilt.android.HiltAndroidApp
+import javax.inject.Inject
 
 /**
  * Application entry point of P-Music.
@@ -20,8 +21,12 @@ import dagger.hilt.android.HiltAndroidApp
 @HiltAndroidApp
 class PMusicApplication : Application() {
 
+    @Inject
+    lateinit var appLifecycleObserver: AppLifecycleObserver
+
     override fun onCreate() {
         super.onCreate()
         PlaybackWidgetManager.onAppStart(this)
+        AppLifecycleObserver.register(appLifecycleObserver)
     }
 }

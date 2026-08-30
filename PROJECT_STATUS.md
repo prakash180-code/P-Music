@@ -2,6 +2,16 @@
 
 ## Current Sprint
 
+**Persistent rotated playback diagnostics** — completed (on-device verified). Playback background-stop diagnostic logging was added *without* changing any playback-fix logic, so the reported "stops when backgrounded / UI shows playing / Play needs two presses" failure is now observable.
+
+- `:domain`: `PlaybackLogLevel` / `PlaybackLogger` contract + `DiagnosticsSnapshot`; `PlaybackController`/`PreferencesRepository` gained `diagnosticsState` (live `StateFlow`) and `setPlaybackDebugLogging`; `AppPreferences.playbackDebugLogging`.
+- `:data`: `PlaybackLoggerImpl` writes app-private `filesDir/diagnostics/playback.log`, rotating `.1`/`.2` at 3 MB each (bounded), corrupt-tolerant, IO + `Mutex`, DEBUG gated by the toggle.
+- `:service`/`:app`: entry format `timestamp | level | component | event | detail`; components SERVICE/CONTROLLER/EQUALIZER/MULTI_OUTPUT/LOGGER/APP; logs player/session/audio-session/equalizer lifecycle, every play/pause/toggle/seek/next/prev/jump/shuffle/repeat command + result, state transitions with isPlaying/playWhenReady/suppression/position/buffered, service lifecycle, and APP_FOREGROUND/APP_BACKGROUND via `ProcessLifecycleOwner`. `PLAYBACK_HEALTH` throttled ~1/s; `PLAYBACK_STALLED` on ≥10 s no-advance; errors with full stack traces.
+- `:features:settings`: Playback Diagnostics screen (live service/session/player/focus/error/stall fields, DEBUG toggle, View/Export/Clear).
+- **Background-repeat test (3×, on-device) findings (evidence only):** backgrounding a playing session causes audio-focus suppression (`isPlaying=false, playWhenReady=true, suppression=1`) — **intermittent**: Round 1 stop persisted, Round 2 auto-recovered ~1 s, Round 3 played to natural ENDED. On return the player often auto-resumes while the button still shows Play, reproducing the "second press / wrong icon" symptom.
+
+## Resume Playback Completed (previous)
+
 **Playback session persistence / "Resume playback"** — completed (on-device verified).
 
 Playback state (current song, queue, position, repeat/shuffle/speed) is now persisted to Room so the app restores the last session on every launch instead of starting empty. Before this, nothing survived the process dying (app swipe-away, force-stop, service kill): the controller's in-memory queue was lost and `connect()` built into an empty service player, so `currentSong=null` and the Mini Player never reappeared. Media3 1.6.1 has no built-in playback-state persistence, so this was implemented manually.

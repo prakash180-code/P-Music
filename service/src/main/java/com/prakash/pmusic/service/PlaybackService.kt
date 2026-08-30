@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -23,7 +24,9 @@ import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.prakash.pmusic.domain.model.ACTION_OPEN_NOW_PLAYING
+import com.prakash.pmusic.domain.model.PlaybackLogLevel
 import com.prakash.pmusic.domain.repository.LibraryRepository
+import com.prakash.pmusic.domain.repository.PlaybackLogger
 import com.prakash.pmusic.service.audio.MultiOutputEngine
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -72,6 +75,9 @@ class PlaybackService : MediaSessionService() {
         const val ACTION_TOGGLE_FAVORITE = "com.prakash.pmusic.service.action.TOGGLE_FAVORITE"
 
         private const val TAG = "PMusicPlaybackService"
+
+        /** Component tag used in the playback diagnostics log. */
+        private const val COMPONENT = "SERVICE"
     }
 
     @Inject
@@ -86,7 +92,13 @@ class PlaybackService : MediaSessionService() {
     @Inject
     lateinit var playbackController: Media3PlaybackController
 
+    @Inject
+    lateinit var playbackLogger: PlaybackLogger
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** Identity of the ExoPlayer this service owns (System.identityHashCode). */
+    private var playerInstance: Int = -1
 
     /** Id of the current media item's song, read from the MediaItem mediaId. */
     private val currentSongId = MutableStateFlow<Long?>(null)
@@ -104,6 +116,13 @@ class PlaybackService : MediaSessionService() {
     private val playerListener = object : Player.Listener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
             Log.i(TAG, "onAudioSessionIdChanged($audioSessionId)")
+            playbackLogger.log(
+                PlaybackLogLevel.INFO,
+                COMPONENT,
+                "AUDIO_SESSION_CHANGED",
+                "audioSessionId=$audioSessionId playerInstance=$playerInstance"
+            )
+            playbackController.reportAudioSession(audioSessionId)
             equalizerEngine.setAudioSessionId(audioSessionId)
         }
 
@@ -114,18 +133,94 @@ class PlaybackService : MediaSessionService() {
             val songId = player.currentMediaItem?.mediaId?.toLongOrNull()
             if (currentSongId.value != songId) {
                 currentSongId.value = songId
+                playbackLogger.log(
+                    PlaybackLogLevel.INFO,
+                    COMPONENT,
+                    "SONG_CHANGED",
+                    "currentSongId=${songId ?: "null"}"
+                )
             }
+
+            // State / playWhenReady transitions are the key to tracing why
+            // audio stops when the app is backgrounded.
+            if (events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) ||
+                events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED) ||
+                events.contains(Player.EVENT_PLAYER_ERROR) ||
+                events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) ||
+                events.contains(Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED)
+            ) {
+                val state = when (player.playbackState) {
+                    Player.STATE_IDLE -> "IDLE"
+                    Player.STATE_BUFFERING -> "BUFFERING"
+                    Player.STATE_READY -> "READY"
+                    Player.STATE_ENDED -> "ENDED"
+                    else -> "UNKNOWN"
+                }
+                playbackLogger.log(
+                    PlaybackLogLevel.INFO,
+                    COMPONENT,
+                    "PLAYER_CHANGED",
+                    "state=$state isPlaying=${player.isPlaying} " +
+                        "playWhenReady=${player.playWhenReady} " +
+                        "suppression=${player.playbackSuppressionReason} " +
+                        "position=${player.currentPosition} " +
+                        "mediaItemIndex=${player.currentMediaItemIndex} " +
+                        "playerInstance=$playerInstance"
+                )
+            }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            Log.e(TAG, "onPlayerError", error)
+            val sb = StringBuilder()
+            sb.append("code=${error.errorCodeName} (${error.errorCode})")
+            error.cause?.let { c ->
+                sb.append(" | cause=${c.javaClass.simpleName}: ${c.message?.take(300).orEmpty()}")
+            }
+            playbackLogger.error(COMPONENT, "PLAYER_ERROR", error)
+            playbackLogger.log(
+                PlaybackLogLevel.ERROR,
+                COMPONENT,
+                "PLAYER_ERROR",
+                sb.toString()
+            )
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val player = mediaSession?.player
         when (intent?.action) {
-            ACTION_PLAY_PAUSE -> if (player != null) {
-                if (player.isPlaying) player.pause() else player.play()
+            ACTION_PLAY_PAUSE -> {
+                playbackLogger.log(
+                    PlaybackLogLevel.INFO,
+                    COMPONENT,
+                    "WIDGET_COMMAND",
+                    "action=PLAY_PAUSE viaStartCommand isPlaying=${player?.isPlaying} " +
+                        "playWhenReady=${player?.playWhenReady} state=${player?.playbackState} " +
+                        "startId=$startId"
+                )
+                if (player != null) {
+                    if (player.isPlaying) {
+                        player.pause()
+                        playbackLogger.log(
+                            PlaybackLogLevel.INFO, COMPONENT, "WIDGET_CMD_RESULT", "paused"
+                        )
+                    } else {
+                        player.play()
+                        playbackLogger.log(
+                            PlaybackLogLevel.INFO, COMPONENT, "WIDGET_CMD_RESULT", "playing"
+                        )
+                    }
+                }
             }
-            ACTION_NEXT -> player?.seekToNextMediaItem()
-            ACTION_PREVIOUS -> player?.seekToPreviousMediaItem()
+            ACTION_NEXT -> {
+                playbackLogger.log(PlaybackLogLevel.INFO, COMPONENT, "WIDGET_COMMAND", "action=NEXT startId=$startId")
+                player?.seekToNextMediaItem()
+            }
+            ACTION_PREVIOUS -> {
+                playbackLogger.log(PlaybackLogLevel.INFO, COMPONENT, "WIDGET_COMMAND", "action=PREVIOUS startId=$startId")
+                player?.seekToPreviousMediaItem()
+            }
             else -> return super.onStartCommand(intent, flags, startId)
         }
         return START_STICKY
@@ -134,6 +229,9 @@ class PlaybackService : MediaSessionService() {
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun onCreate() {
         super.onCreate()
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "SERVICE_LIFECYCLE", "ON_CREATE"
+        )
 
         // A stable audio session lets the equalizer effect bind to this
         // player. The id must come from AudioManager.generateAudioSessionId():
@@ -144,6 +242,10 @@ class PlaybackService : MediaSessionService() {
             (getSystemService(Context.AUDIO_SERVICE) as AudioManager).generateAudioSessionId()
         equalizerEngine.setAudioSessionId(audioSessionId)
         Log.i(TAG, "assigning player audio session $audioSessionId")
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "AUDIO_SESSION_ASSIGNED",
+            "audioSessionId=$audioSessionId source=AudioManager.generateAudioSessionId"
+        )
 
         // The renderers factory installs the multi-output fan-out sink. With
         // no selection it wraps a single default child, so playback behaves
@@ -160,6 +262,7 @@ class PlaybackService : MediaSessionService() {
         }
 
         val player = ExoPlayer.Builder(this, renderersFactory).build().apply {
+            playerInstance = System.identityHashCode(this)
             setAudioSessionId(audioSessionId)
             // Default audio attributes with focus handling let Media3
             // request/relinquish audio focus on our behalf.
@@ -171,6 +274,10 @@ class PlaybackService : MediaSessionService() {
             setWakeMode(C.WAKE_MODE_NETWORK)
             addListener(playerListener)
         }
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "PLAYER_CREATED",
+            "playerInstance=$playerInstance audioSessionId=$audioSessionId"
+        )
 
         // Tapping the notification opens the Now Playing screen.
         val openPlayerIntent = Intent(ACTION_OPEN_NOW_PLAYING).apply {
@@ -210,6 +317,16 @@ class PlaybackService : MediaSessionService() {
             .setCallback(sessionCallback)
             .setCustomLayout(listOf(favoriteCommand))
             .build()
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "MEDIA_SESSION_CREATED",
+            "playerInstance=$playerInstance audioSessionId=$audioSessionId"
+        )
+        // Report liveness so the diagnostics UI reflects a healthy session.
+        playbackController.reportServiceState(
+            alive = true,
+            sessionAlive = true,
+            playerIdentity = playerInstance
+        )
 
         val notificationProvider = FavoriteNotificationProvider(this) {
             currentFavorite.value
@@ -248,10 +365,19 @@ class PlaybackService : MediaSessionService() {
         // Flush the current session to disk so the last song/position survive
         // swiping the app away.
         playbackController.flushPlaybackState()
+        val player = mediaSession?.player
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "SERVICE_TASK_REMOVED",
+            "playWhenReady=${player?.playWhenReady} isPlaying=${player?.isPlaying} " +
+                "mediaItemCount=${player?.mediaItemCount} " +
+                "playerInstance=$playerInstance"
+        )
         // Do not linger as a ghost process when the user swipes the app away
         // while nothing is playing.
-        val player = mediaSession?.player
         if (player == null || !player.playWhenReady || player.mediaItemCount == 0) {
+            playbackLogger.log(
+                PlaybackLogLevel.INFO, COMPONENT, "SERVICE_STOP", "reason=taskRemoved#notPlaying"
+            )
             stopSelf()
         }
     }
@@ -260,9 +386,23 @@ class PlaybackService : MediaSessionService() {
         // Persist the last known playback state before the player is released
         // so a later reopen can restore it (also covers process death paths).
         playbackController.flushPlaybackState()
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "SERVICE_LIFECYCLE",
+            "ON_DESTROY playerInstance=$playerInstance playerAlive=${mediaSession?.player != null}"
+        )
+        // Mark everything dead before releasing so the diagnostics UI reflects it.
+        playbackController.reportServiceState(
+            alive = false,
+            sessionAlive = false,
+            playerIdentity = null
+        )
         serviceScope.cancel()
         mediaSession?.run {
             player.release()
+            playbackLogger.log(
+                PlaybackLogLevel.INFO, COMPONENT, "PLAYER_RELEASED",
+                "playerInstance=$playerInstance"
+            )
             release()
         }
         mediaSession = null

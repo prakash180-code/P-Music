@@ -47,5 +47,10 @@ data class AppPreferences(
     /** Whether the last multi-output selection is preselected again next time. */
     val rememberOutputSelection: Boolean = true,
     /** Device ids of the last started multi-output selection. */
-    val rememberedOutputIds: Set<String> = emptySet()
+    val rememberedOutputIds: Set<String> = emptySet(),
+    /**
+     * Whether extremely verbose DEBUG playback logging is enabled. Kept off by
+     * default; turning it on writes frequent position samples to the log.
+     */
+    val playbackDebugLogging: Boolean = false
 )

@@ -2,6 +2,29 @@
 
 All notable changes to P-Music are documented here.
 
+## [Diagnostics instrumentation] - 2026-08-30
+
+### Persistent rotated playback diagnostics (`:domain`, `:data`, `:core:datastore`, `:service`, `:app`, `:features:settings`)
+
+**Goal:** make the reported "playback stops when the app is backgrounded (UI may still show playing, Play sometimes needs two presses)" failure observable before fixing it. No playback-fix logic was changed — this adds logging only.
+
+**Logging contract (`:domain`):**
+- `PlaybackLogLevel` (DEBUG/INFO/WARN/ERROR with `label`/`isEnabledFor`) and `PlaybackLogger` interface (`level`, `setDebugEnabled`, `log`, `debug`/`info`/`warn`/`error`, `error(component,event,th)`, `read`/`export`/`clear`) plus a `DiagnosticsSnapshot` data model.
+- `PlaybackController` / `PreferencesRepository` gained a live `diagnosticsState: StateFlow<DiagnosticsSnapshot>` and `setPlaybackDebugLogging`; `AppPreferences` gained `playbackDebugLogging`.
+
+**Logger implementation (`:data`):** `PlaybackLoggerImpl` (`@Singleton`) writes to app-private `filesDir/diagnostics/playback.log` (no permissions, survives activity/player/service recreation + background), rotating to `playback.log.1` / `playback.log.2` at 3 MB/file (~2-5 MB bounded), `Mutex` + `Dispatchers.IO`, corrupt-tolerant, and gates the DEBUG level on the `playbackDebugLogging` toggle.
+
+**Instrumentation (`:service` / `:app`):** every entry is `timestamp | level | component | event | detail`, with component tags SERVICE / CONTROLLER / EQUALIZER / MULTI_OUTPUT / LOGGER / APP. Logged: player/session create & release (identity via `System.identityHashCode`), audio-session id + changes, equalizer attach/detach/rebind/probe failures, media-item transitions + song changes, state transitions (IDLE/BUFFERING/READY/ENDED) with `isPlaying`/`playWhenReady`/`suppression`/`position`/`buffered`, **every** PLAY/PAUSE/TOGGLE/SEEK/NEXT/PREV/JUMP/SHUFFLE/REPEAT command + result (before/after state), service lifecycle (ON_CREATE/ON_DESTROY/ON_TASK_REMOVED/PLAYER_CREATED/PLAYER_RELEASED/MEDIA_SESSION_CREATED), and **APP_FOREGROUND/APP_BACKGROUND** via `ProcessLifecycleOwner` (`AppLifecycleObserver`, registered from `PMusicApplication`). `PLAYBACK_HEALTH` is throttled to ~1/s and `PLAYBACK_STALLED` fires when `isPlaying` but position does not advance ≥ 10 s. All player errors log full stack traces.
+
+**Diagnostics screen (`:features:settings`):** a Settings→Playback Diagnostics row (hosted by `AppRootScreen`) showing live Playback Service / MediaSession / Player / state / position / audio-session / focus / last error / last event / last stall, a "Playback Debug Logging" DEBUG toggle, and View Logs / Export / Clear actions (export as `p_music_playback_log.txt` via the share sheet). Diagnostics only — no personal/account/audio data (song title/artist OK).
+
+**Verification (device 0025865CN000478, Android 16 / SDK 36, Media3 1.6.1):** full `:data`/`:domain`/`:core:datastore`/`:service` compile + `:app:assembleDebug` + `testDebugUnitTest` green; APK installed; on device the log is created in app-private storage and records service lifecycle, audio session 251961, equalizer attach, controller connect, session restore, song change and READY transitions; `ProcessLifecycleOwner` logs every foreground/background transition.
+
+**Background-repeat test (3×, song "Aalapikkey Ummak" ~188 s) findings — evidence only, no fix:**
+- Backgrounded while playing then observed via the log: the player loses audio focus and is paused with `isPlaying=false, playWhenReady=true, suppression=1`.
+- Behavior is **intermittent**: Round 1 the stop persisted until foreground; Round 2 it auto-recovered in ~0.8 s; Round 3 the song played through to a natural `ENDED` with no stop.
+- On returning to the app, playback often **auto-resumes** (because `playWhenReady=true` is retained) while the mini-player button still renders **Play** — that mismatched state reproduces the reported "wrong icon / second press" symptom.
+
 ## [0.15.1] - 2026-08-30
 
 ### Playback session persistence / "Resume playback" (`:service`, `:data`, `:core:database`, `:domain`)

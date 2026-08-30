@@ -14,6 +14,8 @@ import com.prakash.pmusic.domain.model.MultiOutputCapability
 import com.prakash.pmusic.domain.model.MultiOutputDevice
 import com.prakash.pmusic.domain.model.MultiOutputState
 import com.prakash.pmusic.domain.model.OemCapabilityInfo
+import com.prakash.pmusic.domain.model.PlaybackLogLevel
+import com.prakash.pmusic.domain.repository.PlaybackLogger
 import com.prakash.pmusic.domain.repository.PreferencesRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -40,11 +42,13 @@ import kotlinx.coroutines.withContext
 @Singleton
 class MultiOutputEngine @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val preferencesRepository: PreferencesRepository
+    private val preferencesRepository: PreferencesRepository,
+    private val playbackLogger: PlaybackLogger
 ) {
 
     companion object {
         private const val TAG = "PMultiOutputEngine"
+        private const val COMPONENT = "MULTI_OUTPUT"
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -117,6 +121,10 @@ class MultiOutputEngine @Inject constructor(
         )
         sink = newSink
         newSink.updateOutputs(currentTargets())
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "SINK_CREATED",
+            "installed=false"
+        )
         return newSink
     }
 
@@ -167,6 +175,10 @@ class MultiOutputEngine @Inject constructor(
                     message = "Playing on ${resolved.size} output(s)."
                 )
                 Log.i(TAG, "multi-output started: $selectedIds")
+                playbackLogger.log(
+                    PlaybackLogLevel.INFO, COMPONENT, "MULTI_OUTPUT_START",
+                    "devices=${deviceIds.joinToString(",")}"
+                )
             }
         }
     }
@@ -178,6 +190,7 @@ class MultiOutputEngine @Inject constructor(
         sink?.updateOutputs(listOf(OutputTarget(null, 1f)))
         _state.value = MultiOutputState(active = false, outputs = emptyList(), message = null)
         Log.i(TAG, "multi-output stopped")
+        playbackLogger.log(PlaybackLogLevel.INFO, COMPONENT, "MULTI_OUTPUT_STOP", "active=false")
     }
 
     /** Sets the per-output volume of [deviceId] (0..100). */

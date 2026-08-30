@@ -1,5 +1,6 @@
 package com.prakash.pmusic.domain.repository
 
+import com.prakash.pmusic.domain.model.DiagnosticsSnapshot
 import com.prakash.pmusic.domain.model.EqualizerState
 import com.prakash.pmusic.domain.model.MultiOutputCapability
 import com.prakash.pmusic.domain.model.MultiOutputDevice
@@ -35,6 +36,9 @@ interface PlaybackController {
 
     /** Live state of the multi-output session (active outputs + volumes). */
     val multiOutputState: StateFlow<MultiOutputState>
+
+    /** Live playback-stack diagnostics (service/session/player/focus/errors). */
+    val diagnosticsState: StateFlow<DiagnosticsSnapshot>
 
     /** Connects to the media session. Safe to call multiple times. */
     fun connect()

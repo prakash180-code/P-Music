@@ -45,4 +45,7 @@ class PreferencesRepositoryImpl @Inject constructor(
 
     override suspend fun setRememberedOutputIds(ids: Set<String>) =
         dataStore.setRememberedOutputIds(ids)
+
+    override suspend fun setPlaybackDebugLogging(enabled: Boolean) =
+        dataStore.setPlaybackDebugLogging(enabled)
 }

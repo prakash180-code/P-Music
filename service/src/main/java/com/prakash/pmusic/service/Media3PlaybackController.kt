@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -18,16 +19,19 @@ import com.prakash.pmusic.core.media.toMediaItem
 import com.prakash.pmusic.core.media.toPlayerRepeatMode
 import com.prakash.pmusic.core.media.toSong
 import android.database.Cursor
+import com.prakash.pmusic.domain.model.DiagnosticsSnapshot
 import com.prakash.pmusic.domain.model.EqualizerState
 import com.prakash.pmusic.domain.model.MultiOutputCapability
 import com.prakash.pmusic.domain.model.MultiOutputDevice
 import com.prakash.pmusic.domain.model.MultiOutputState
+import com.prakash.pmusic.domain.model.PlaybackLogLevel
 import com.prakash.pmusic.domain.model.PlaybackState
 import com.prakash.pmusic.domain.model.RepeatMode
 import com.prakash.pmusic.domain.model.SavedPlaybackState
 import com.prakash.pmusic.domain.model.Song
 import com.prakash.pmusic.domain.repository.LibraryRepository
 import com.prakash.pmusic.domain.repository.PlaybackController
+import com.prakash.pmusic.domain.repository.PlaybackLogger
 import com.prakash.pmusic.domain.repository.PlaybackStateRepository
 import com.prakash.pmusic.domain.repository.PreferencesRepository
 import com.prakash.pmusic.service.audio.MultiOutputEngine
@@ -69,13 +73,17 @@ class Media3PlaybackController @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val playbackStateRepository: PlaybackStateRepository,
     private val equalizerEngine: AudioFxEqualizerEngine,
-    private val multiOutputEngine: MultiOutputEngine
+    private val multiOutputEngine: MultiOutputEngine,
+    private val playbackLogger: PlaybackLogger
 ) : PlaybackController {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val _playbackState = MutableStateFlow(PlaybackState())
     override val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
+
+    private val _diagnosticsState = MutableStateFlow(DiagnosticsSnapshot())
+    override val diagnosticsState: StateFlow<DiagnosticsSnapshot> = _diagnosticsState.asStateFlow()
 
     override val equalizerState: StateFlow<EqualizerState> = equalizerEngine.state
 
@@ -110,6 +118,56 @@ class Media3PlaybackController @Inject constructor(
     /** The last song id that was persisted as current, to detect song changes. */
     private var lastSavedSongId: Long? = null
 
+    /** Monotonic time (ms) of the last PLAYBACK_HEALTH log, to throttle it. */
+    private var lastHealthLogMs = 0L
+
+    /** Last position from the health loop, used to detect a stalled player. */
+    private var lastHealthPositionMs = 0L
+
+    /** Monotonic time when the position last advanced, for stall detection. */
+    private var lastAdvanceElapsedMs = 0L
+
+    /** Whether a stall is currently being reported (avoid log spam). */
+    private var stallReported = false
+
+    /** Raw identity of the service-side ExoPlayer, reported via diagnostics. */
+    @Volatile
+    private var servicePlayerInstance: Int? = null
+
+    /** Identity of the current MediaController (System.identityHashCode). */
+    @Volatile
+    private var controllerInstance: Int? = null
+
+    /** Whether the playback service process/host is currently alive. */
+    @Volatile
+    private var serviceAlive = false
+
+    /** Whether the service-side MediaSession is currently connected/alive. */
+    @Volatile
+    private var mediaSessionAlive = false
+
+    /** The audio session id reported by the service-side player (-1 unknown). */
+    @Volatile
+    private var reportedAudioSessionId: Int = -1
+
+    /**
+     * Called by [PlaybackService] so the controller (and the diagnostics UI)
+     * can reflect service/session/player liveness without the UI reaching into
+     * the service. [identity] is System.identityHashCode of the service player.
+     */
+    fun reportServiceState(alive: Boolean, sessionAlive: Boolean, playerIdentity: Int?) {
+        serviceAlive = alive
+        mediaSessionAlive = sessionAlive
+        servicePlayerInstance = playerIdentity
+        publishDiagnostics(controller)
+    }
+
+    /** Reports the actual audio session id from the service-side player. */
+    fun reportAudioSession(audioSessionId: Int) {
+        reportedAudioSessionId = audioSessionId
+        publishDiagnostics(controller)
+    }
+
     init {
         scope.launch {
             preferencesRepository.preferences.collect { prefs ->
@@ -126,6 +184,8 @@ class Media3PlaybackController @Inject constructor(
             if (player.playbackState == Player.STATE_READY && player.isPlaying) {
                 equalizerEngine.notifyPlaybackActive()
             }
+            logMeaningfulChanges(events)
+
             // Persist periodically while playing (throttled) and immediately on
             // any media-item transition so the saved "current song" never lags
             // behind what is actually playing.
@@ -135,6 +195,57 @@ class Media3PlaybackController @Inject constructor(
                 maybePeriodicSave(player)
             }
         }
+
+        override fun onPlayerError(error: PlaybackException) {
+            Log.e(TAG, "onPlayerError", error)
+            playbackLogger.error(COMPONENT, "PLAYER_ERROR", error)
+            _diagnosticsState.update {
+                it.copy(lastError = "${error.errorCodeName} (${error.errorCode})")
+            }
+        }
+    }
+
+    /**
+     * Logs discrete, meaningful playback changes (state / playWhenReady /
+     * suppression / item transitions / errors) at INFO, keeping the log
+     * readable. Verbose per-ms position sampling happens only in the health
+     * loop and only when DEBUG logging is enabled.
+     */
+    private fun logMeaningfulChanges(events: Player.Events) {
+        val player = controller ?: return
+        val meaningful =
+            events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) ||
+                events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED) ||
+                events.contains(Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED) ||
+                events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) ||
+                events.contains(Player.EVENT_IS_PLAYING_CHANGED) ||
+                events.contains(Player.EVENT_PLAYER_ERROR)
+        if (!meaningful) return
+        val state = when (player.playbackState) {
+            Player.STATE_IDLE -> "IDLE"
+            Player.STATE_BUFFERING -> "BUFFERING"
+            Player.STATE_READY -> "READY"
+            Player.STATE_ENDED -> "ENDED"
+            else -> "UNKNOWN"
+        }
+        val eventNames = listOf(
+            events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) to "STATE",
+            events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED) to "PWY",
+            events.contains(Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED) to "SUPPRESSION",
+            events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) to "TRANSITION",
+            events.contains(Player.EVENT_IS_PLAYING_CHANGED) to "IS_PLAYING",
+            events.contains(Player.EVENT_PLAYER_ERROR) to "ERROR"
+        ).filter { it.first }.joinToString(",") { it.second }
+        playbackLogger.log(
+            PlaybackLogLevel.INFO,
+            COMPONENT,
+            "PLAYER_CHANGED",
+            "events=$eventNames state=$state isPlaying=${player.isPlaying} " +
+                "playWhenReady=${player.playWhenReady} suppression=${player.playbackSuppressionReason} " +
+                "position=${player.currentPosition} buffered=${player.bufferedPosition} " +
+                "mediaItemIndex=${player.currentMediaItemIndex} controller=${controllerInstance} " +
+                "player=$servicePlayerInstance"
+        )
     }
 
     override fun connect() {
@@ -146,11 +257,17 @@ class Media3PlaybackController @Inject constructor(
         if (current != null) {
             if (current.isConnected) return
             Log.w(TAG, "connect() dropping stale controller")
+            playbackLogger.log(
+                PlaybackLogLevel.WARN, COMPONENT, "CONTROLLER_RECREATED",
+                "reason=stale(dead) previous=${controllerInstance}"
+            )
             current.removeListener(playerListener)
             runCatching { current.release() }
             controller = null
+            controllerInstance = null
         }
         Log.d(TAG, "connect() building MediaController")
+        playbackLogger.log(PlaybackLogLevel.INFO, COMPONENT, "CONTROLLER_CONNECT", "building MediaController")
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
         future.addListener(
@@ -158,11 +275,21 @@ class Media3PlaybackController @Inject constructor(
                 val connected = runCatching { future.get() }.getOrNull()
                 if (connected == null) {
                     Log.e(TAG, "connect() failed")
+                    playbackLogger.log(
+                        PlaybackLogLevel.ERROR, COMPONENT, "CONTROLLER_CONNECT_FAILED",
+                        "MediaController connection returned null"
+                    )
                     return@addListener
                 }
                 Log.d(TAG, "connect() connected: $connected")
                 connected.addListener(playerListener)
                 controller = connected
+                controllerInstance = System.identityHashCode(connected)
+                playbackLogger.log(
+                    PlaybackLogLevel.INFO, COMPONENT, "CONTROLLER_CONNECTED",
+                    "controller=$controllerInstance"
+                )
+                publishDiagnostics(connected)
                 syncState(connected)
                 pendingExternalUri?.let { uri ->
                     pendingExternalUri = null
@@ -249,6 +376,12 @@ class Media3PlaybackController @Inject constructor(
             "restore: after sync currentMediaItemIndex=${player.currentMediaItemIndex} " +
                 "currentSong=${_playbackState.value.currentSong?.title}"
         )
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "SESSION_RESTORED",
+            "restored=${restored.size} index=$index position=${position}ms " +
+                "speed=${saved.playbackSpeed} shuffle=${saved.shuffleEnabled} " +
+                "repeat=${saved.repeatMode} remainingPaused=true"
+        )
     }
 
     /** True when the content resolver can still resolve [uri] to a row. */
@@ -271,10 +404,18 @@ class Media3PlaybackController @Inject constructor(
     override fun disconnect() {
         positionTicker?.cancel()
         positionTicker = null
+        if (controller != null) {
+            playbackLogger.log(
+                PlaybackLogLevel.INFO, COMPONENT, "CONTROLLER_DISCONNECT",
+                "controller=$controllerInstance player=$servicePlayerInstance"
+            )
+        }
         controller?.removeListener(playerListener)
         controller?.release()
         controller = null
+        controllerInstance = null
         _playbackState.value = PlaybackState()
+        _diagnosticsState.value = DiagnosticsSnapshot()
         pendingExternalUri = null
         externalPlayback = false
         lastRecordedSongId = null
@@ -359,7 +500,18 @@ class Media3PlaybackController @Inject constructor(
     override fun playSong(song: Song) {
         val player = controller
         Log.d(TAG, "playSong(title=${song.title}, controller=${if (player == null) "null" else "ok"})")
-        if (player == null) return
+        if (player == null) {
+            playbackLogger.log(
+                PlaybackLogLevel.WARN, COMPONENT, "PLAY_COMMAND_DROPPED",
+                "action=playSong title=${song.title} reason=controllerNotConnected"
+            )
+            return
+        }
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "PLAY_COMMAND",
+            "action=playSong title=${song.title} state=${stateName(player)} " +
+                "isPlaying=${player.isPlaying} playWhenReady=${player.playWhenReady}"
+        )
         queue = listOf(song)
         externalPlayback = false
         player.setMediaItem(song.toMediaItem())
@@ -372,6 +524,11 @@ class Media3PlaybackController @Inject constructor(
     override fun playQueue(queue: List<Song>, startIndex: Int) {
         val player = controller ?: return
         if (queue.isEmpty()) return
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "PLAY_COMMAND",
+            "action=playQueue size=${queue.size} startIndex=$startIndex " +
+                "state=${stateName(player)} isPlaying=${player.isPlaying}"
+        )
         this.queue = queue
         externalPlayback = false
         val items: List<MediaItem> = queue.map { it.toMediaItem() }
@@ -418,6 +575,10 @@ class Media3PlaybackController @Inject constructor(
         player.prepare()
         player.setPlaybackSpeed(defaultPlaybackSpeed)
         player.play()
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "PLAY_COMMAND",
+            "action=playExternalAudio uri=$uriString"
+        )
     }
 
     /** Builds enough metadata for the mini-player while MediaStore catches up. */
@@ -473,39 +634,84 @@ class Media3PlaybackController @Inject constructor(
     }
 
     override fun pause() {
-        controller?.pause()
-        controller?.let { saveOnEvent(it) }
+        val player = controller
+        if (player != null) {
+            playbackLogger.log(
+                PlaybackLogLevel.INFO, COMPONENT, "PAUSE_COMMAND",
+                "isPlaying=${player.isPlaying} playWhenReady=${player.playWhenReady} state=${stateName(player)}"
+            )
+            player.pause()
+            playbackLogger.log(
+                PlaybackLogLevel.INFO, COMPONENT, "PAUSE_COMMAND_RESULT",
+                "isPlaying=${player.isPlaying} playWhenReady=${player.playWhenReady} state=${stateName(player)}"
+            )
+            saveOnEvent(player)
+        }
     }
 
     override fun togglePlayPause() {
         val player = controller ?: return
-        if (player.isPlaying) {
+        val wasPlaying = player.isPlaying
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "TOGGLE_COMMAND",
+            "wasPlaying=$wasPlaying playWhenReady=${player.playWhenReady} state=${stateName(player)}"
+        )
+        if (wasPlaying) {
             player.pause()
         } else {
             player.play()
         }
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "TOGGLE_COMMAND_RESULT",
+            "isPlaying=${player.isPlaying} playWhenReady=${player.playWhenReady} state=${stateName(player)}"
+        )
         // Persist on pause; on resume the periodic ticker keeps state fresh.
         if (!player.isPlaying) saveOnEvent(player)
     }
 
     override fun seekTo(positionMs: Long) {
-        controller?.seekTo(positionMs)
-        controller?.let { saveOnEvent(it) }
+        val player = controller
+        if (player != null) {
+            playbackLogger.log(
+                PlaybackLogLevel.INFO, COMPONENT, "SEEK_COMMAND",
+                "to=$positionMs from=${player.currentPosition} state=${stateName(player)}"
+            )
+            player.seekTo(positionMs)
+            saveOnEvent(player)
+        }
     }
 
     override fun next() {
-        controller?.seekToNextMediaItem()
-        controller?.let { saveOnEvent(it) }
+        val player = controller
+        if (player != null) {
+            playbackLogger.log(
+                PlaybackLogLevel.INFO, COMPONENT, "NEXT_COMMAND",
+                "index=${player.currentMediaItemIndex} size=${player.mediaItemCount}"
+            )
+            player.seekToNextMediaItem()
+            saveOnEvent(player)
+        }
     }
 
     override fun previous() {
-        controller?.seekToPreviousMediaItem()
-        controller?.let { saveOnEvent(it) }
+        val player = controller
+        if (player != null) {
+            playbackLogger.log(
+                PlaybackLogLevel.INFO, COMPONENT, "PREV_COMMAND",
+                "index=${player.currentMediaItemIndex} size=${player.mediaItemCount}"
+            )
+            player.seekToPreviousMediaItem()
+            saveOnEvent(player)
+        }
     }
 
     override fun jumpToQueueIndex(index: Int) {
         val player = controller ?: return
         if (queue.isEmpty() || index !in queue.indices) return
+        playbackLogger.log(
+            PlaybackLogLevel.INFO, COMPONENT, "JUMP_COMMAND",
+            "toIndex=$index fromIndex=${player.currentMediaItemIndex} state=${stateName(player)}"
+        )
         player.seekTo(index, 0L)
         player.setPlaybackSpeed(defaultPlaybackSpeed)
         player.play()
@@ -537,11 +743,13 @@ class Media3PlaybackController @Inject constructor(
 
     override fun setShuffleEnabled(enabled: Boolean) {
         controller?.shuffleModeEnabled = enabled
+        playbackLogger.log(PlaybackLogLevel.INFO, COMPONENT, "SHUFFLE_CHANGED", "enabled=$enabled")
         controller?.let { saveOnEvent(it) }
     }
 
     override fun setRepeatMode(mode: RepeatMode) {
         controller?.repeatMode = mode.toPlayerRepeatMode()
+        playbackLogger.log(PlaybackLogLevel.INFO, COMPONENT, "REPEAT_CHANGED", "mode=$mode")
         controller?.let { saveOnEvent(it) }
     }
 
@@ -569,6 +777,36 @@ class Media3PlaybackController @Inject constructor(
 
     override fun refreshMultiOutputCapabilities() = multiOutputEngine.refreshCapabilities()
 
+    private fun stateName(player: Player): String = when (player.playbackState) {
+        Player.STATE_IDLE -> "IDLE"
+        Player.STATE_BUFFERING -> "BUFFERING"
+        Player.STATE_READY -> "READY"
+        Player.STATE_ENDED -> "ENDED"
+        else -> "UNKNOWN"
+    }
+
+    /** Publishes the live DiagnosticsSnapshot derived from the player/state. */
+    private fun publishDiagnostics(player: Player?) {
+        val connected = controller
+        _diagnosticsState.value = DiagnosticsSnapshot(
+            serviceAlive = serviceAlive,
+            mediaSessionAlive = mediaSessionAlive,
+            playerAlive = connected != null && connected.playbackState != Player.STATE_IDLE,
+            playerInstance = connected?.let { System.identityHashCode(it) },
+            controllerInstance = controllerInstance,
+            playerState = connected?.let { stateName(it) } ?: "UNKNOWN",
+            isPlaying = connected?.isPlaying ?: false,
+            playWhenReady = connected?.playWhenReady ?: false,
+            suppressionReason = connected?.playbackSuppressionReason ?: 0,
+            currentMediaItemIndex = connected?.currentMediaItemIndex ?: -1,
+            positionMs = connected?.currentPosition?.coerceAtLeast(0L) ?: 0L,
+            bufferedPositionMs = connected?.bufferedPosition?.coerceAtLeast(0L) ?: 0L,
+            durationMs = connected?.duration?.coerceAtLeast(0L) ?: 0L,
+            audioSessionId = reportedAudioSessionId,
+            servicePlayerInstance = servicePlayerInstance
+        )
+    }
+
     private fun syncState(player: Player) {
         val currentIndex = player.currentMediaItemIndex
         val hasItem = currentIndex >= 0
@@ -593,6 +831,7 @@ class Media3PlaybackController @Inject constructor(
             playbackSpeed = player.playbackParameters.speed,
             isConnected = true
         )
+        publishDiagnostics(player)
     }
 
     /** Starts/stops the position ticker based on the play state. */
@@ -601,23 +840,75 @@ class Media3PlaybackController @Inject constructor(
             if (positionTicker != null) return
             positionTicker = scope.launch {
                 while (isActive) {
-                    _playbackState.update { state ->
-                        val current = controller
-                        if (current != null) {
-                            state.copy(
-                                positionMs = current.currentPosition.coerceAtLeast(0L),
-                                durationMs = current.duration.coerceAtLeast(0L)
-                            )
-                        } else {
-                            state
+                    val current = controller
+                    if (current != null) {
+                        val pos = current.currentPosition.coerceAtLeast(0L)
+                        val dur = current.duration.coerceAtLeast(0L)
+                        _playbackState.update { state ->
+                            state.copy(positionMs = pos, durationMs = dur)
                         }
+                        updateHealthAndStall(pos)
                     }
-                    delay(POSITION_TICK_MS)
+                    delay(HEALTH_TICK_MS)
                 }
             }
         } else {
             positionTicker?.cancel()
             positionTicker = null
+        }
+    }
+
+    /**
+     * Periodic PLAYBACK_HEALTH snapshot (throttled to ~1/s) and PLAYBACK_STALLED
+     * detection: isPlaying true but position not advancing for ~10 s. This is
+     * the primary observable for the background-stop bug. It only observes and
+     * logs — it never auto-restarts playback.
+     */
+    private fun updateHealthAndStall(positionMs: Long) {
+        val player = controller ?: return
+        val now = android.os.SystemClock.elapsedRealtime()
+
+        // Advance tracking: the position changed (or jumped), so reset the clock.
+        if (positionMs != lastHealthPositionMs) {
+            lastHealthPositionMs = positionMs
+            lastAdvanceElapsedMs = now
+            stallReported = false
+        }
+
+        // Anticipated progress if audio were actually advancing.
+        val advancedSinceStallCheck = (now - lastAdvanceElapsedMs) >= STALL_THRESHOLD_MS
+
+        // Throttle the verbose health entry to ~1/s.
+        if (now - lastHealthLogMs >= HEALTH_LOG_INTERVAL_MS) {
+            lastHealthLogMs = now
+            val state = stateName(player)
+            val health =
+                "isPlaying=${player.isPlaying} state=$state " +
+                    "playWhenReady=${player.playWhenReady} position=$positionMs " +
+                    "buffered=${player.bufferedPosition} audioSession=$reportedAudioSessionId " +
+                    "player=$servicePlayerInstance controller=$controllerInstance " +
+                    "serviceAlive=${serviceAlive} mediaSessionAlive=${mediaSessionAlive}"
+            playbackLogger.log(PlaybackLogLevel.DEBUG, COMPONENT, "PLAYBACK_HEALTH", health)
+        }
+
+        // Stall: claims playing but the position has not advanced for >=10s.
+        if (player.isPlaying && player.playbackState == Player.STATE_READY && advancedSinceStallCheck) {
+            if (!stallReported) {
+                stallReported = true
+                val detail =
+                    "lastPosition=$lastHealthPositionMs currentPosition=$positionMs " +
+                        "elapsedSinceAdvance=${now - lastAdvanceElapsedMs}ms state=${stateName(player)} " +
+                        "suppression=${player.playbackSuppressionReason} " +
+                        "audioSession=$reportedAudioSessionId player=$servicePlayerInstance " +
+                        "controller=$controllerInstance serviceAlive=$serviceAlive " +
+                        "mediaSessionAlive=$mediaSessionAlive"
+                playbackLogger.log(
+                    PlaybackLogLevel.ERROR, COMPONENT, "PLAYBACK_STALLED", detail
+                )
+                _diagnosticsState.update {
+                    it.copy(lastStall = detail)
+                }
+            }
         }
     }
 
@@ -641,6 +932,14 @@ class Media3PlaybackController @Inject constructor(
         const val POSITION_TICK_MS = 500L
         /** How often the playback position is persisted to Room while playing. */
         const val SAVE_INTERVAL_MS = 3_000L
+        /** Frequency of the PLAYBACK_HEALTH + stall detector loop (ms). */
+        const val HEALTH_TICK_MS = 500L
+        /** How often a verbose HEALTH entry is written (ms). */
+        const val HEALTH_LOG_INTERVAL_MS = 1_000L
+        /** Position must fail to advance this long before flagging a stall (ms). */
+        const val STALL_THRESHOLD_MS = 10_000L
         const val TAG = "PMusicPlayback"
+        /** Component tag used in the playback diagnostics log. */
+        const val COMPONENT = "CONTROLLER"
     }
 }

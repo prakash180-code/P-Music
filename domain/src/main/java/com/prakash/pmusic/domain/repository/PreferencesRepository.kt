@@ -44,4 +44,7 @@ interface PreferencesRepository {
 
     /** Persists the device ids of the last started multi-output selection. */
     suspend fun setRememberedOutputIds(ids: Set<String>)
+
+    /** Enables or disables verbose DEBUG playback logging. */
+    suspend fun setPlaybackDebugLogging(enabled: Boolean)
 }
