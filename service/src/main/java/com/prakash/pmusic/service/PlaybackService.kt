@@ -143,6 +143,20 @@ class PlaybackService : MediaSessionService() {
 
             // State / playWhenReady transitions are the key to tracing why
             // audio stops when the app is backgrounded.
+            if (events.contains(Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED)) {
+                // Media3 maps audio-focus loss to a suppression reason: 0=none,
+                // 1=transient focus loss (auto-resumes). Captured explicitly so
+                // focus-driven pauses are distinguishable from becoming-noisy.
+                playbackLogger.log(
+                    PlaybackLogLevel.INFO,
+                    COMPONENT,
+                    "SUPPRESSION_CHANGED",
+                    "suppression=${player.playbackSuppressionReason} " +
+                        "playWhenReady=${player.playWhenReady} " +
+                        "isPlaying=${player.isPlaying} " +
+                        "playerInstance=$playerInstance"
+                )
+            }
             if (events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) ||
                 events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED) ||
                 events.contains(Player.EVENT_PLAYER_ERROR) ||

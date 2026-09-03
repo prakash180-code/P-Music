@@ -2,7 +2,14 @@
 
 ## Current Sprint
 
-**Persistent rotated playback diagnostics** — completed (on-device verified). Playback background-stop diagnostic logging was added *without* changing any playback-fix logic, so the reported "stops when backgrounded / UI shows playing / Play needs two presses" failure is now observable.
+**Fix: silent background renderer freeze in `MultiOutputAudioSink`** — completed (on-device verified). Resolves the reported "playback stops when the app is backgrounded / UI still shows playing / Play needs two presses".
+
+- **Root cause (via diagnostics):** the background stop is a **silent renderer freeze** — the player froze at one position while still reporting `isPlaying=true`, and logged **no** playback event (no `playWhenReady`/`suppression`/command change). The fan-out `MultiOutputAudioSink` guarded every method with a single `synchronized(lock)` and executed blocking child calls (`DefaultAudioSink.configure`/`setPreferredDevice`/`setVolume`) inside that critical section on the main thread during output reconfiguration. If that reconfiguration stalled, the renderer's `handleBuffer` blocked on the same lock indefinitely — audio froze while player state stayed "playing". A bypass build (stock `DefaultAudioSink`) eliminated the freeze, confirming the wrapper as the source.
+- **Fix:** child list is now an immutable `@Volatile` snapshot; the renderer hot path reads it **without any lock** and never waits on reconfiguration. Output reconfiguration runs on a **single dedicated config thread**, doing blocking child work outside the shared lock and swapping the published snapshot under a brief lock only. Release is idempotent (`AtomicBoolean` + `configExecutor.shutdown()`).
+- **Diagnostics added:** `SUPPRESSION_CHANGED` (`PlaybackService.onEvents` on `EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED`) and `ROUTE_DEVICES_ADDED`/`ROUTE_DEVICES_REMOVED` (`MultiOutputEngine` audio device callbacks), both INFO-level.
+- **Verification (0025865CN000478):** bypass + hardened builds both ran backgrounded with continuous advancement and clean track transitions. Hardened build: **4.5+ min backgrounded, zero stalls, still `PLAYING`** at the end — versus the previous build's 5-minute silence at one position. `:app:assembleDebug` green; APK installed.
+
+**Persistent rotated playback diagnostics** — completed (on-device verified) and retained as the observability layer that led to the fix above. Playback background-stop diagnostic logging was added *without* pre-committing to a fix direction, so the failure was observable.
 
 - `:domain`: `PlaybackLogLevel` / `PlaybackLogger` contract + `DiagnosticsSnapshot`; `PlaybackController`/`PreferencesRepository` gained `diagnosticsState` (live `StateFlow`) and `setPlaybackDebugLogging`; `AppPreferences.playbackDebugLogging`.
 - `:data`: `PlaybackLoggerImpl` writes app-private `filesDir/diagnostics/playback.log`, rotating `.1`/`.2` at 3 MB each (bounded), corrupt-tolerant, IO + `Mutex`, DEBUG gated by the toggle.

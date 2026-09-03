@@ -2,6 +2,32 @@
 
 All notable changes to P-Music are documented here.
 
+## [Fix: silent background renderer freeze] - 2026-09-03
+
+### Root cause (diagnosed with the playback logger, then fixed in `MultiOutputAudioSink`)
+
+The reported "playback stops when the app is backgrounded (UI may still show playing)" turned out to be a **silent renderer freeze**, not a deliberate pause:
+
+- With the fan-out `MultiOutputAudioSink` installed, backgrounded playback would freeze with the player stuck at one position while still reporting `isPlaying=true`, and **no playback event was logged** (no `playWhenReady`/`suppression`/command change). One confirmed occurrence held position 16087 for 5+ minutes.
+- Root cause: the sink guarded **every** method with one `synchronized(lock)`, and `updateOutputs`/`updateVolumes`/`setVolume` ran potentially-blocking child calls (`DefaultAudioSink.configure`, `setPreferredDevice`, `setVolume`) **inside** that critical section on the main thread. If that reconfiguration stalled, the renderer's `handleBuffer` blocked on the same lock indefinitely — freezing audio while the player state stayed "playing".
+- A bypass experiment (stock `DefaultAudioSink` instead of the wrapper) eliminated the freeze, confirming the wrapper was the source.
+
+### Fix (`MultiOutputAudioSink`)
+
+- The child list is now an immutable `@Volatile` snapshot; the renderer hot path (`handleBuffer` and friends) reads it **with no lock** and never waits on reconfiguration.
+- Output reconfiguration runs on a **single dedicated config thread** and does all blocking child work (`configure`/`setPreferredDevice`/`setVolume`) **outside** the shared lock, only swapping the published snapshot under a brief lock. A stuck reconfigure can no longer deadlock the renderer.
+- Added `AtomicBoolean released` + `configExecutor.shutdown()` so release is idempotent and a pending reconfig cannot touch released children.
+
+### Diagnostics added (INFO-level)
+
+- `SUPPRESSION_CHANGED` in `PlaybackService.onEvents` on `EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED` (focus-loss distinguishable from becoming-noisy).
+- `ROUTE_DEVICES_ADDED` / `ROUTE_DEVICES_REMOVED` in `MultiOutputEngine`'s `AudioDeviceCallback` (route/device churn visibility).
+
+### Verification (device 0025865CN000478)
+
+- Bypass build: backgrounded playback advanced continuously (no silent freeze) ~2 min through a clean track transition.
+- Hardened build: **4.5+ minutes of backgrounded playback with zero stalls**, steady position every 10 s sample, clean auto-track transitions (items 23→24→25), and still `state=PLAYING` at the end — versus the previous build's 5-minute silence at one position. `:app:assembleDebug` green; APK installed.
+
 ## [Diagnostics instrumentation] - 2026-08-30
 
 ### Persistent rotated playback diagnostics (`:domain`, `:data`, `:core:datastore`, `:service`, `:app`, `:features:settings`)

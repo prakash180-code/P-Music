@@ -86,10 +86,20 @@ class MultiOutputEngine @Inject constructor(
         audioManager.registerAudioDeviceCallback(
             object : AudioDeviceCallback() {
                 override fun onAudioDevicesAdded(addedDevices: Array<AudioDeviceInfo>) {
+                    playbackLogger.log(
+                        PlaybackLogLevel.INFO, COMPONENT, "ROUTE_DEVICES_ADDED",
+                        "count=${addedDevices.size} " +
+                            addedDevices.joinToString(",") { d -> "${d.type}:${d.productName}" }
+                    )
                     handleDevicesChanged()
                 }
 
                 override fun onAudioDevicesRemoved(removedDevices: Array<AudioDeviceInfo>) {
+                    playbackLogger.log(
+                        PlaybackLogLevel.INFO, COMPONENT, "ROUTE_DEVICES_REMOVED",
+                        "count=${removedDevices.size} " +
+                            removedDevices.joinToString(",") { d -> "${d.type}:${d.productName}" }
+                    )
                     handleDevicesChanged()
                 }
             },
