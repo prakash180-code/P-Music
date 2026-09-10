@@ -3,6 +3,7 @@ package com.prakash.pmusic.service
 import android.content.ComponentName
 import android.content.ContentResolver
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
@@ -497,6 +498,31 @@ class Media3PlaybackController @Inject constructor(
         }
     }
 
+    /**
+     * Promotes [PlaybackService] to the foreground before playback starts.
+     *
+     * On modern Android (targetSdk 33+) a background-started foreground
+     * service is denied unless the app is in the foreground/temporary
+     * allowlist. These play commands always run while the app is visible, so
+     * requesting the FGS start here (instead of relying on Media3's lazy
+     * promotion) guarantees [PlaybackService] acquires the foreground state —
+     * and keeps it while the session has media loaded — so backgrounded
+     * playback is not killed as an idle background service.
+     */
+    private fun promoteServiceToForeground() {
+        runCatching {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, PlaybackService::class.java)
+            )
+        }.onFailure { e ->
+            playbackLogger.log(
+                PlaybackLogLevel.WARN, COMPONENT, "FGS_PROMOTE_FAILED",
+                "cause=${e.javaClass.simpleName}: ${e.message?.take(200).orEmpty()}"
+            )
+        }
+    }
+
     override fun playSong(song: Song) {
         val player = controller
         Log.d(TAG, "playSong(title=${song.title}, controller=${if (player == null) "null" else "ok"})")
@@ -512,6 +538,7 @@ class Media3PlaybackController @Inject constructor(
             "action=playSong title=${song.title} state=${stateName(player)} " +
                 "isPlaying=${player.isPlaying} playWhenReady=${player.playWhenReady}"
         )
+        promoteServiceToForeground()
         queue = listOf(song)
         externalPlayback = false
         player.setMediaItem(song.toMediaItem())
@@ -529,6 +556,7 @@ class Media3PlaybackController @Inject constructor(
             "action=playQueue size=${queue.size} startIndex=$startIndex " +
                 "state=${stateName(player)} isPlaying=${player.isPlaying}"
         )
+        promoteServiceToForeground()
         this.queue = queue
         externalPlayback = false
         val items: List<MediaItem> = queue.map { it.toMediaItem() }
@@ -555,6 +583,7 @@ class Media3PlaybackController @Inject constructor(
         if (uri.scheme.isNullOrBlank()) return
 
         val song = externalSong(uri)
+        promoteServiceToForeground()
         queue = listOf(song)
         externalPlayback = true
         lastRecordedSongId = null
@@ -659,6 +688,9 @@ class Media3PlaybackController @Inject constructor(
         if (wasPlaying) {
             player.pause()
         } else {
+            // Resuming must re-acquire the foreground state while the app is
+            // still visible; the system denies FGS starts from the background.
+            promoteServiceToForeground()
             player.play()
         }
         playbackLogger.log(
@@ -712,6 +744,7 @@ class Media3PlaybackController @Inject constructor(
             PlaybackLogLevel.INFO, COMPONENT, "JUMP_COMMAND",
             "toIndex=$index fromIndex=${player.currentMediaItemIndex} state=${stateName(player)}"
         )
+        promoteServiceToForeground()
         player.seekTo(index, 0L)
         player.setPlaybackSpeed(defaultPlaybackSpeed)
         player.play()

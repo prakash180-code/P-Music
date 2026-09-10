@@ -2,6 +2,31 @@
 
 All notable changes to P-Music are documented here.
 
+## [Fix: promote media service to foreground for background playback] - 2026-09-10
+
+### Root cause (read from device logs, then fixed)
+
+After the renderer-freeze fix, the reported "song stops when played in the background" was re-investigated from device logs. The manifest already declared the media playback foreground-service permission and `foregroundServiceType="mediaPlayback"` with `stopWithTask="false"`, but the service was **never actually promoted to the foreground** on the start path — it was only ever bound by the Media3 `MediaController`:
+
+- `POST_NOTIFICATIONS` was `granted=false` (and there was **zero** runtime permission request in the codebase), so on Android 13+ the media notification could not even be posted.
+- The system log showed `startForegroundService()` **DENIED** the moment the app left the foreground (`mAllowStartForeground false`), followed by `Stopping service due to app idle: u0a383` — the OS killing background playback because the media session had no valid foreground service.
+
+### Fix
+
+- `MainActivity`: requests `POST_NOTIFICATIONS` at runtime (Android 13+) via `rememberLauncherForActivityResult`, so the media notification can actually be shown.
+- `Media3PlaybackController`: new `promoteServiceToForeground()` calls `ContextCompat.startForegroundService(...)` and is invoked **before** `play()` in `playSong`, `playQueue`, `playExternalAudioNow`, `togglePlayPause` (on resume), and `jumpToQueueIndex` — while the app is still visible, so the system will allow the promotion and the service is foreground for the whole session.
+- `PlaybackService`:
+  - `onStartCommand` logs every foreground-start request (`FGS_START`) including player state, so a denied promotion is visible in the diagnostics log.
+  - `promoteToForegroundIfPlaying()` re-posts the media notification on widget/media-button play from a (possibly backgrounded) state.
+  - `MediaSessionService.Listener.onForegroundServiceStartNotAllowedException` logs `FGS_START_DENIED` when the system refuses a promotion.
+
+### Verification (Moto G32 / Android 13, SDK 33)
+
+- Fresh APK installed; `POST_NOTIFICATIONS` granted via runtime request.
+- Started a song, backgrounded the app: the service entered the foreground state (`isForeground=true`, `foregroundId=1001`, media notification active) with the promotion Allowed at play time.
+- Playback **survived in the background for the full track** (media position advanced ~206 s, past the app-idle kill window that previously stopped the service), with no playback freeze and the notification kept active. `:app:assembleDebug` green.
+- Note: on some devices an inactive-app-idle service stop can still terminate playback; the added `FGS_START`/`FGS_START_DENIED` diagnostics make the remaining failure mode observable (and promotion now genuinely happens while the app is in the foreground).
+
 ## [Fix: silent background renderer freeze] - 2026-09-03
 
 ### Root cause (diagnosed with the playback logger, then fixed in `MultiOutputAudioSink`)

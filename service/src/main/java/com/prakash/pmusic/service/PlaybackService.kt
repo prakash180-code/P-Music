@@ -204,6 +204,20 @@ class PlaybackService : MediaSessionService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val player = mediaSession?.player
         when (intent?.action) {
+            // A null action is a startForegroundService request from the
+            // controller at play time; Media3's default handling still needs
+            // to run so it can push the foreground notification.
+            null -> {
+                playbackLogger.log(
+                    PlaybackLogLevel.INFO,
+                    COMPONENT,
+                    "FGS_START",
+                    "startId=$startId isPlaying=${player?.isPlaying} " +
+                        "playWhenReady=${player?.playWhenReady} " +
+                        "mediaItemCount=${player?.mediaItemCount}"
+                )
+                return super.onStartCommand(intent, flags, startId)
+            }
             ACTION_PLAY_PAUSE -> {
                 playbackLogger.log(
                     PlaybackLogLevel.INFO,
@@ -220,6 +234,9 @@ class PlaybackService : MediaSessionService() {
                             PlaybackLogLevel.INFO, COMPONENT, "WIDGET_CMD_RESULT", "paused"
                         )
                     } else {
+                        // Widget plays go through the same foreground promotion
+                        // path as the app so a background resume is not denied.
+                        promoteToForegroundIfPlaying()
                         player.play()
                         playbackLogger.log(
                             PlaybackLogLevel.INFO, COMPONENT, "WIDGET_CMD_RESULT", "playing"
@@ -350,6 +367,19 @@ class PlaybackService : MediaSessionService() {
         }
         setMediaNotificationProvider(notificationProvider)
 
+        // The system denies a second foreground-service start when the app is
+        // backgrounded (the exact failure mode of the background-stop bug).
+        // Media3 1.6 surfaces that refusal through the service listener; log it
+        // so a denied promotion is visible in the playback diagnostics.
+        setListener(object : MediaSessionService.Listener {
+            override fun onForegroundServiceStartNotAllowedException() {
+                playbackLogger.log(
+                    PlaybackLogLevel.WARN, COMPONENT, "FGS_START_DENIED",
+                    "system refused a foreground-service start (app backgrounded)"
+                )
+            }
+        })
+
         // Keep the notification heart in sync with the library (toggling the
         // favorite anywhere — player, library, notification — updates it).
         serviceScope.launch {
@@ -369,6 +399,24 @@ class PlaybackService : MediaSessionService() {
         val songId = session.player.currentMediaItem?.mediaId?.toLongOrNull() ?: return
         serviceScope.launch {
             libraryRepository.setFavorite(songId, !currentFavorite.value)
+        }
+    }
+
+    /**
+     * Re-promotes this service to the foreground if playback is (about to be)
+     * ongoing. Media3's [MediaSessionService] posts the playback notification
+     * as soon as the player has media and starts, which transitions this
+     * service into the foreground state that the system will not kill.
+     */
+    private fun promoteToForegroundIfPlaying() {
+        val session = mediaSession ?: return
+        val player = session.player
+        if (player.playWhenReady || player.mediaItemCount > 0) {
+            playbackLogger.log(
+                PlaybackLogLevel.INFO, COMPONENT, "PROMOTE_FOREGROUND",
+                "playWhenReady=${player.playWhenReady} mediaItemCount=${player.mediaItemCount}"
+            )
+            onUpdateNotification(session, /* isPlaybackOngoing= */ true)
         }
     }
 

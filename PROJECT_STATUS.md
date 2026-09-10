@@ -2,6 +2,13 @@
 
 ## Current Sprint
 
+**Fix: promote media service to foreground for background playback** — completed (on-device verified on Moto G32 / Android 13). Addresses the reported "song stops when played in the background". The manifest already declared FGS permission + `foregroundServiceType="mediaPlayback"` + `stopWithTask="false"`, but the service was never actually **promoted** to the foreground — it was only bound by the Media3 controller, `POST_NOTIFICATIONS` was never requested at runtime, and the system log showed `startForegroundService()` **DENIED** once backgrounded, then `Stopping service due to app idle`.
+
+- `MainActivity`: runtime `POST_NOTIFICATIONS` request (Android 13+).
+- `Media3PlaybackController.promoteServiceToForeground()`: `ContextCompat.startForegroundService` before `play()` in `playSong` / `playQueue` / `playExternalAudioNow` / `togglePlayPause` (resume) / `jumpToQueueIndex`.
+- `PlaybackService`: `FGS_START` diagnostics in `onStartCommand`; `promoteToForegroundIfPlaying()` re-posts the media notification on widget/media-button play; `onForegroundServiceStartNotAllowedException` logs `FGS_START_DENIED`.
+- **Verification (Moto G32):** permission granted, service enters `isForeground=true` with the media notification at play time, and backgrounded playback survives a full track (~206 s) past the previous idle-stop window with no freeze. `:app:assembleDebug` green.
+
 **Fix: silent background renderer freeze in `MultiOutputAudioSink`** — completed (on-device verified). Resolves the reported "playback stops when the app is backgrounded / UI still shows playing / Play needs two presses".
 
 - **Root cause (via diagnostics):** the background stop is a **silent renderer freeze** — the player froze at one position while still reporting `isPlaying=true`, and logged **no** playback event (no `playWhenReady`/`suppression`/command change). The fan-out `MultiOutputAudioSink` guarded every method with a single `synchronized(lock)` and executed blocking child calls (`DefaultAudioSink.configure`/`setPreferredDevice`/`setVolume`) inside that critical section on the main thread during output reconfiguration. If that reconfiguration stalled, the renderer's `handleBuffer` blocked on the same lock indefinitely — audio froze while player state stayed "playing". A bypass build (stock `DefaultAudioSink`) eliminated the freeze, confirming the wrapper as the source.

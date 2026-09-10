@@ -186,6 +186,31 @@ private fun MainContent(
         ActivityResultContracts.RequestPermission()
     ) { granted -> hasPermission = granted }
 
+    // Notification permission (API 33+) is required for the playback service's
+    // foreground notification to be visible, which is what keeps the service
+    // alive in the background. Ask for it right after media access is granted,
+    // before the user starts playback, so the media session can stay foreground.
+    var notificationRequested by remember { mutableStateOf(false) }
+    val notificationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* Result is advisory only; playback still attempts promotion. */ }
+    LaunchedEffect(hasPermission, notificationRequested) {
+        val needsNotifications =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                hasPermission &&
+                !notificationRequested &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+        if (needsNotifications) {
+            notificationRequested = true
+            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else if (hasPermission && !notificationRequested) {
+            notificationRequested = true
+        }
+    }
+
     val mediaStoreVersion = remember(context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching { MediaStore.getVersion(context) }.getOrNull()
