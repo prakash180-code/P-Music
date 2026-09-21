@@ -165,6 +165,14 @@ fun NowPlayingScreen(
                             } else {
                                 showDeleteConfirm = true
                             }
+                        },
+                        queuePosition = if (
+                            playbackState.queue.isNotEmpty() &&
+                            playbackState.queueIndex in playbackState.queue.indices
+                        ) {
+                            playbackState.queueIndex + 1 to playbackState.queue.size
+                        } else {
+                            null
                         }
                     )
                 }
@@ -319,7 +327,8 @@ private fun SongInfo(
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     showDelete: Boolean,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    queuePosition: Pair<Int, Int>? = null
 ) {
     Row(
         modifier = Modifier
@@ -331,6 +340,17 @@ private fun SongInfo(
             modifier = Modifier.weight(1f),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            if (queuePosition != null) {
+                Text(
+                    text = "${queuePosition.first} of ${queuePosition.second}",
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+            }
             Text(
                 text = song.title,
                 style = MaterialTheme.typography.headlineSmall,
