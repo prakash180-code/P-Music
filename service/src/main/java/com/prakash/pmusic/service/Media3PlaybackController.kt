@@ -538,12 +538,15 @@ class Media3PlaybackController @Inject constructor(
             "action=playSong title=${song.title} state=${stateName(player)} " +
                 "isPlaying=${player.isPlaying} playWhenReady=${player.playWhenReady}"
         )
-        promoteServiceToForeground()
         queue = listOf(song)
         externalPlayback = false
         player.setMediaItem(song.toMediaItem())
         player.prepare()
         player.setPlaybackSpeed(defaultPlaybackSpeed)
+        // The service must have media before it is promoted. Otherwise Media3
+        // may not create an ongoing notification, leaving Android free to
+        // stop the service shortly after the app backgrounds.
+        promoteServiceToForeground()
         player.play()
         saveOnEvent(player)
     }
@@ -556,7 +559,6 @@ class Media3PlaybackController @Inject constructor(
             "action=playQueue size=${queue.size} startIndex=$startIndex " +
                 "state=${stateName(player)} isPlaying=${player.isPlaying}"
         )
-        promoteServiceToForeground()
         this.queue = queue
         externalPlayback = false
         val items: List<MediaItem> = queue.map { it.toMediaItem() }
@@ -564,6 +566,8 @@ class Media3PlaybackController @Inject constructor(
         player.setMediaItems(items, safeIndex, 0L)
         player.prepare()
         player.setPlaybackSpeed(defaultPlaybackSpeed)
+        // Promote only once the service has media to expose in its notification.
+        promoteServiceToForeground()
         player.play()
         saveOnEvent(player)
     }
@@ -583,7 +587,6 @@ class Media3PlaybackController @Inject constructor(
         if (uri.scheme.isNullOrBlank()) return
 
         val song = externalSong(uri)
-        promoteServiceToForeground()
         queue = listOf(song)
         externalPlayback = true
         lastRecordedSongId = null
@@ -603,6 +606,8 @@ class Media3PlaybackController @Inject constructor(
         )
         player.prepare()
         player.setPlaybackSpeed(defaultPlaybackSpeed)
+        // External playback needs the same notification/FGS ordering.
+        promoteServiceToForeground()
         player.play()
         playbackLogger.log(
             PlaybackLogLevel.INFO, COMPONENT, "PLAY_COMMAND",
