@@ -50,6 +50,12 @@ sealed interface SmartPlaylistRule {
         override val label: String = "Never played"
     }
 
+    /** Every song in the library. */
+    data object AllSongs : SmartPlaylistRule {
+        override val encode: String = "all_songs"
+        override val label: String = "All songs"
+    }
+
     /** Every song in [name]'s genre. */
     data class Genre(val name: String) : SmartPlaylistRule {
         override val encode: String = "genre:$name"
@@ -71,6 +77,7 @@ sealed interface SmartPlaylistRule {
             raw == RecentlyAdded.encode -> RecentlyAdded
             raw == RecentlyPlayed.encode -> RecentlyPlayed
             raw == NeverPlayed.encode -> NeverPlayed
+            raw == AllSongs.encode -> AllSongs
             raw.startsWith("genre:") -> Genre(raw.removePrefix("genre:"))
             raw.startsWith("artist:") -> parseArtist(raw)
             else -> null

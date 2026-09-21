@@ -109,6 +109,7 @@ class PlaylistRepositoryImpl @Inject constructor(
         is SmartPlaylistRule.RecentlyAdded -> songDao.observeRecentlyAdded(SMART_PLAYLIST_LIMIT)
         is SmartPlaylistRule.RecentlyPlayed -> songDao.observeRecentlyPlayed(SMART_PLAYLIST_LIMIT)
         is SmartPlaylistRule.NeverPlayed -> songDao.observeNeverPlayed()
+        is SmartPlaylistRule.AllSongs -> songDao.observeAllSongs()
         is SmartPlaylistRule.Genre -> songDao.observeByGenre(parsed.name)
         is SmartPlaylistRule.Artist -> songDao.observeByArtist(parsed.artistId)
         null -> flowOf(emptyList())

@@ -43,6 +43,12 @@ class SmartPlaylistRuleTest {
     }
 
     @Test
+    fun `all songs rule round-trips`() {
+        val rule = SmartPlaylistRule.AllSongs
+        assertEquals(SmartPlaylistRule.AllSongs, SmartPlaylistRule.parse(rule.encode))
+    }
+
+    @Test
     fun `genre rule round-trips with colons inside the name`() {
         val rule = SmartPlaylistRule.Genre("Electronic: Downtempo")
         val parsed = SmartPlaylistRule.parse(rule.encode)
@@ -88,6 +94,7 @@ class SmartPlaylistRuleTest {
     fun `labels describe the rule`() {
         assertEquals("Favorites", SmartPlaylistRule.Favorites.label)
         assertEquals("Most played", SmartPlaylistRule.MostPlayed.label)
+        assertEquals("All songs", SmartPlaylistRule.AllSongs.label)
         assertEquals("Genre · Rock", SmartPlaylistRule.Genre("Rock").label)
         assertEquals("Artist · AC/DC", SmartPlaylistRule.Artist(1L, "AC/DC").label)
     }

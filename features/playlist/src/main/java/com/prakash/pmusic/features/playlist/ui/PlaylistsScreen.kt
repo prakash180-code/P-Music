@@ -560,11 +560,12 @@ private fun SongPickerDialog(
 
 /** Which rule type the smart-playlist dialog is building. */
 private enum class SmartKind {
-    Favorites, MostPlayed, RecentlyAdded, RecentlyPlayed, NeverPlayed, Genre, Artist
+    AllSongs, Favorites, MostPlayed, RecentlyAdded, RecentlyPlayed, NeverPlayed, Genre, Artist
 }
 
 /** Smart-playlist kinds that need no extra input, in display order. */
 private val SimpleSmartKinds = listOf(
+    SmartKind.AllSongs,
     SmartKind.Favorites,
     SmartKind.MostPlayed,
     SmartKind.RecentlyAdded,
@@ -573,6 +574,7 @@ private val SimpleSmartKinds = listOf(
 )
 
 private fun SmartKind.label(): String = when (this) {
+    SmartKind.AllSongs -> SmartPlaylistRule.AllSongs.label
     SmartKind.Favorites -> SmartPlaylistRule.Favorites.label
     SmartKind.MostPlayed -> SmartPlaylistRule.MostPlayed.label
     SmartKind.RecentlyAdded -> SmartPlaylistRule.RecentlyAdded.label
@@ -605,6 +607,7 @@ private fun SmartPlaylistDialog(
     }
 
     val rule = when (kind) {
+        SmartKind.AllSongs -> SmartPlaylistRule.AllSongs
         SmartKind.Favorites -> SmartPlaylistRule.Favorites
         SmartKind.MostPlayed -> SmartPlaylistRule.MostPlayed
         SmartKind.RecentlyAdded -> SmartPlaylistRule.RecentlyAdded
