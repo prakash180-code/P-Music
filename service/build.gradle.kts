@@ -39,6 +39,7 @@ dependencies {
     // Media3 player + session hosting
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
+    implementation(libs.androidx.lifecycle.process)
 
     // Coroutines for controller-side state ticker
     implementation(libs.kotlinx.coroutines.android)

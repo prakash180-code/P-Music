@@ -523,3 +523,20 @@ The reported "playback stops when the app is backgrounded (UI may still show pla
 - AGP 8.13.2, Kotlin 2.2.10, KSP 2.2.10-2.0.2
 - Compose BOM 2025.06.01, core-ktx 1.16.0, activity-compose 1.10.1, lifecycle 2.9.1
 - Hilt 2.56.2, JUnit 4.13.2, androidx.test.ext:junit 1.2.1, espresso-core 3.6.1
+
+## [Guarded FGS promotions on Android 16/SDK 36] - 2026-10-04
+
+### Root cause
+
+Backgrounded track transitions triggered FGS re-promotions while app was backgrounded; on Android 16/SDK 36 these were denied (FGS_START_DENIED). In some cases Media3 responded to denial by pausing playback (isPlaying/playWhenReady became false without user command/focus loss). Service/process remained alive.
+
+### Fix
+
+- **Media3PlaybackController.kt**: added ProcessLifecycleOwner/Lifecycle guard promoteIfForeground() (promote only when Lifecycle.State.RESUMED), skip with PROMOTE_SKIPPED when backgrounded; replaced promotion call sites (playSong, playQueue, playExternalAudioNow, togglePlayPause on resume, jumpToQueueIndex) preserving 'promote after setting media'.
+- **PlaybackService.kt**: added isAppForeground() and lastDeniedWhileBgPlaying; onForegroundServiceStartNotAllowedException() logs richer context (bg, playing, msSince) and does **not** change playback state on denial.
+- **service/build.gradle.kts**: added ndroidx.lifecycle.process.
+
+### Verification
+
+- :app:assembleDebug green; installed on A001T (Android 16/SDK 36).
+- Backgrounded track transitions produced FGS_START but no new FGS_START_DENIED in guarded operation; playback remained isPlaying=true, playWhenReady=true. Updated denial handler no longer pauses playback.

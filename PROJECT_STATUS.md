@@ -156,3 +156,6 @@ Playback state (current song, queue, position, repeat/shuffle/speed) is now pers
 ## Next Sprint
 
 Next roadmap item from Pending Features (optional future modules — Wi-Fi sync, online search).
+
+
+**Guarded FGS promotions on Android 16/SDK 36** - completed. Gated FGS promotions on Lifecycle.State.RESUMED (promoteIfForeground), skipping when backgrounded (PROMOTE_SKIPPED). onForegroundServiceStartNotAllowedException logs context (bg,playing,msSince,lastDeniedWhileBgPlaying) without pausing playback. Added androidx.lifecycle.process to service. Build/install ok; backgrounded transitions show no new FGS_START_DENIED and playback remains isPlaying=true, playWhenReady=true.

@@ -7,6 +7,8 @@ import android.media.AudioManager
 import android.os.Bundle
 import android.util.Log
 import androidx.annotation.OptIn
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
@@ -104,7 +106,17 @@ class PlaybackService : MediaSessionService() {
     private val currentSongId = MutableStateFlow<Long?>(null)
 
     /** Whether the current song is favorited; drives the notification heart. */
+    private var lastDeniedWhileBgPlaying: Long = 0L
+
     private val currentFavorite = MutableStateFlow(false)
+
+    private fun isAppForeground(): Boolean {
+        return try {
+            ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        } catch (e: Exception) {
+            true
+        }
+    }
 
     private var mediaSession: MediaSession? = null
 
@@ -367,15 +379,22 @@ class PlaybackService : MediaSessionService() {
         }
         setMediaNotificationProvider(notificationProvider)
 
-        // The system denies a second foreground-service start when the app is
+// The system denies a second foreground-service start when the app is
         // backgrounded (the exact failure mode of the background-stop bug).
         // Media3 1.6 surfaces that refusal through the service listener; log it
         // so a denied promotion is visible in the playback diagnostics.
         setListener(object : MediaSessionService.Listener {
             override fun onForegroundServiceStartNotAllowedException() {
+                val now = System.currentTimeMillis()
+                val player = mediaSession?.player
+                val bg = !isAppForeground()
+                if (bg && player?.isPlaying == true) {
+                    lastDeniedWhileBgPlaying = now
+                }
+                val msSince = if (lastDeniedWhileBgPlaying == now) 0L else (now - lastDeniedWhileBgPlaying)
                 playbackLogger.log(
                     PlaybackLogLevel.WARN, COMPONENT, "FGS_START_DENIED",
-                    "system refused a foreground-service start (app backgrounded)"
+                    "bg=$bg playing=${player?.isPlaying} msSince=$msSince"
                 )
             }
         })

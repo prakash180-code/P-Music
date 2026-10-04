@@ -8,6 +8,8 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -509,16 +511,32 @@ class Media3PlaybackController @Inject constructor(
      * and keeps it while the session has media loaded — so backgrounded
      * playback is not killed as an idle background service.
      */
+private fun promoteIfForeground() {
+        val state = try {
+            ProcessLifecycleOwner.get().lifecycle.currentState
+        } catch (e: Exception) {
+            androidx.lifecycle.Lifecycle.State.RESUMED
+        }
+        if (state.isAtLeast(Lifecycle.State.RESUMED)) {
+            promoteServiceToForeground()
+        } else {
+            playbackLogger.log(
+                PlaybackLogLevel.DEBUG, COMPONENT, "PROMOTE_SKIPPED",
+                "reason=app_not_foreground state=$state"
+            )
+        }
+    }
+
     private fun promoteServiceToForeground() {
-        runCatching {
+        try {
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, PlaybackService::class.java)
             )
-        }.onFailure { e ->
+        } catch (e: Exception) {
             playbackLogger.log(
                 PlaybackLogLevel.WARN, COMPONENT, "FGS_PROMOTE_FAILED",
-                "cause=${e.javaClass.simpleName}: ${e.message?.take(200).orEmpty()}"
+                "exception=${e::class.java.simpleName} message=${e.message}"
             )
         }
     }
@@ -546,7 +564,7 @@ class Media3PlaybackController @Inject constructor(
         // The service must have media before it is promoted. Otherwise Media3
         // may not create an ongoing notification, leaving Android free to
         // stop the service shortly after the app backgrounds.
-        promoteServiceToForeground()
+        promoteIfForeground()
         player.play()
         saveOnEvent(player)
     }
@@ -567,7 +585,7 @@ class Media3PlaybackController @Inject constructor(
         player.prepare()
         player.setPlaybackSpeed(defaultPlaybackSpeed)
         // Promote only once the service has media to expose in its notification.
-        promoteServiceToForeground()
+        promoteIfForeground()
         player.play()
         saveOnEvent(player)
     }
@@ -607,7 +625,7 @@ class Media3PlaybackController @Inject constructor(
         player.prepare()
         player.setPlaybackSpeed(defaultPlaybackSpeed)
         // External playback needs the same notification/FGS ordering.
-        promoteServiceToForeground()
+        promoteIfForeground()
         player.play()
         playbackLogger.log(
             PlaybackLogLevel.INFO, COMPONENT, "PLAY_COMMAND",
@@ -695,7 +713,7 @@ class Media3PlaybackController @Inject constructor(
         } else {
             // Resuming must re-acquire the foreground state while the app is
             // still visible; the system denies FGS starts from the background.
-            promoteServiceToForeground()
+            promoteIfForeground()
             player.play()
         }
         playbackLogger.log(
@@ -749,7 +767,7 @@ class Media3PlaybackController @Inject constructor(
             PlaybackLogLevel.INFO, COMPONENT, "JUMP_COMMAND",
             "toIndex=$index fromIndex=${player.currentMediaItemIndex} state=${stateName(player)}"
         )
-        promoteServiceToForeground()
+        promoteIfForeground()
         player.seekTo(index, 0L)
         player.setPlaybackSpeed(defaultPlaybackSpeed)
         player.play()
