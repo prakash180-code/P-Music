@@ -2,6 +2,12 @@
 
 ## Current Sprint
 
+**Fix: background playback stopped on track transition (FGS self-demotion)** — completed (on-device verified on A001T / Android 16, SDK 36). This is the true root cause behind the still-reported "song stops in the background", which the earlier promotion fix did not fully close.
+
+- **Root cause (from a clean repro):** `PlaybackService` refreshed the favorite heart with `onUpdateNotification(session, false)` on every song/favorite change. In Media3 1.6.1 that flag routes to `MediaNotificationManager.updateNotificationInternal(..., false)` → `Util.stopForeground()`, so the service **demoted itself out of the foreground while still playing**. On the next track transition Media3's own `onNotificationRefreshRequired` called `startForegroundService()` from the background, which the OS **denied** (`ForegroundServiceStartNotAllowedException`, `uidState: SVC`, `code:DENIED`), leaving a plain background service that the OS then idle-stopped ~60 s later (process frozen → playback stalled while `PlaybackState=PLAYING`).
+- **Fix (`PlaybackService`):** override `onUpdateNotification(session, startInForegroundRequired)` to force the flag to `true` whenever playback is ongoing (`playWhenReady && (STATE_READY || STATE_BUFFERING)`), mirroring Media3's `isAnySessionUserEngaged`. The service can no longer demote itself during playback, so subsequent refreshes keep it foreground.
+- **Verification (A001T):** fresh APK installed; playback started then backgrounded; the session crossed **two natural track transitions** (item 50→51→52) with `isForeground=true` / `curProcState=4` throughout and **zero** `FGS_START_DENIED` after the fix. `:app:assembleDebug` green.
+
 **Fix: promote media service to foreground for background playback** — completed (on-device verified on Moto G32 / Android 13). Addresses the reported "song stops when played in the background". The manifest already declared FGS permission + `foregroundServiceType="mediaPlayback"` + `stopWithTask="false"`, but the service was never actually **promoted** to the foreground — it was only bound by the Media3 controller, `POST_NOTIFICATIONS` was never requested at runtime, and the system log showed `startForegroundService()` **DENIED** once backgrounded, then `Stopping service due to app idle`.
 
 - `MainActivity`: runtime `POST_NOTIFICATIONS` request (Android 13+).

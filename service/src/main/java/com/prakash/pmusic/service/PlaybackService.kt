@@ -439,6 +439,14 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
+        val player = session.player
+        val state = player.playbackState
+        val ongoing = player.playWhenReady &&
+            (state == Player.STATE_READY || state == Player.STATE_BUFFERING)
+        super.onUpdateNotification(session, startInForegroundRequired || ongoing)
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
         mediaSession
 

@@ -2,6 +2,28 @@
 
 All notable changes to P-Music are documented here.
 
+## [Fix: background playback stopped on track transition (FGS self-demotion)] - 2026-10-10
+
+### Root cause (captured from a clean on-device repro)
+
+Reproduced on A001T (Nothing OS, Android 16 / SDK 36) with a natural track change while backgrounded. The service was foreground while playing, but on the **track transition** the app log showed `FGS_START_DENIED bg=true playing=true` and the system log showed:
+
+- `W/ActivityManager: Background started FGS: Disallowed [... uidState: SVC ... code:DENIED ...]`
+- `E/MSessionService: ForegroundServiceStartNotAllowedException: startForegroundService() not allowed ... at androidx.media3.session.MediaNotificationManager.startForeground(MediaNotificationManager.java:436)`
+- followed ~60 s later by `W/ActivityManager: Stopping service due to app idle: com.prakash.pmusic/.service.PlaybackService`.
+
+`PlaybackService` refreshed the favorite heart by calling `onUpdateNotification(session, false)` on every song/favorite change. In Media3 1.6.1, `MediaNotificationManager.updateNotificationInternal(..., startInForegroundRequired=false)` calls `Util.stopForeground()` — so the service **demoted itself out of the foreground** while STILL PLAYING. The next notification refresh (Media3's own `onNotificationRefreshRequired` on the track change) then tried `startForegroundService()` from the background and was denied, leaving the service a plain background service which the OS idle-stopped (process frozen → playback stalled with `PlaybackState=PLAYING`).
+
+### Fix (`PlaybackService`)
+
+- Override `onUpdateNotification(session, startInForegroundRequired)` to force `startInForegroundRequired = true` whenever playback is ongoing (`playWhenReady && (STATE_READY || STATE_BUFFERING)`), matching Media3's own `isAnySessionUserEngaged` heuristic. This prevents the service from ever demoting itself out of the foreground during playback, so subsequent refreshes keep it foreground instead of getting denied.
+
+### Verification (A001T / Android 16, SDK 36)
+
+- Fresh debug APK built and installed; started playback, backgrounded the app.
+- Crossed **two natural track transitions** while backgrounded (item 50→51→52): service stayed `isForeground=true`, `curProcState=4` the whole time and the diagnostic log recorded **zero** `FGS_START_DENIED` after the fix.
+- `:app:assembleDebug` green.
+
 ## [Fix: promote media service to foreground for background playback] - 2026-09-10
 
 ### Root cause (read from device logs, then fixed)
